@@ -2,6 +2,11 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Core", "MiniBus.Core\MiniBus.Core.csproj", "{B3E130C7-5EBB-48DE-9774-9B5530323870}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Common", "Common", "{A66D75B7-1801-446F-A7F8-DE6CFF388201}"
+	ProjectSection(SolutionItems) = preProject
+		Updates.md = Updates.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
