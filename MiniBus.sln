@@ -10,7 +10,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "openspec", "openspec", "{E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}"
 	ProjectSection(SolutionItems) = preProject
 		openspec\project.md = openspec\project.md
-		openspec\changes\add-core-message-processing\.openspec.yaml = openspec\changes\add-core-message-processing\.openspec.yaml
 		openspec\config.yaml = openspec\config.yaml
 	EndProjectSection
 EndProject
@@ -19,25 +18,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Core.Tests", "tests\MiniBus.Core.Tests\MiniBus.Core.Tests.csproj", "{DE5034F0-C146-4786-96A2-BE7B56B1A9D7}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "changes", "changes", "{81147AEB-E298-4341-9E98-062ED81ADC4C}"
-	ProjectSection(SolutionItems) = preProject
-		openspec\changes\add-core-message-processing\.openspec.yaml = openspec\changes\add-core-message-processing\.openspec.yaml
-	EndProjectSection
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "add-core-message-processing", "add-core-message-processing", "{99306A7C-AB35-42FE-99A2-20732A43B066}"
-	ProjectSection(SolutionItems) = preProject
-		openspec\changes\add-core-message-processing\tasks.md = openspec\changes\add-core-message-processing\tasks.md
-		openspec\changes\add-core-message-processing\design.md = openspec\changes\add-core-message-processing\design.md
-		openspec\changes\add-core-message-processing\proposal.md = openspec\changes\add-core-message-processing\proposal.md
-	EndProjectSection
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "specs", "specs", "{FF9C48F7-463B-4230-BB6B-2256042780C9}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "minibus-core", "minibus-core", "{42645E1B-FCEA-448E-8107-4DB3E49BE2C1}"
-	ProjectSection(SolutionItems) = preProject
-		openspec\changes\add-core-message-processing\specs\minibus-core\spec.md = openspec\changes\add-core-message-processing\specs\minibus-core\spec.md
-	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -57,9 +37,5 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{DC8FD8D2-667E-40A9-8D52-1E8792447820} = {5AB2733C-61E3-4E08-9A37-03783C1012D1}
 		{DE5034F0-C146-4786-96A2-BE7B56B1A9D7} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
-		{81147AEB-E298-4341-9E98-062ED81ADC4C} = {E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}
-		{99306A7C-AB35-42FE-99A2-20732A43B066} = {81147AEB-E298-4341-9E98-062ED81ADC4C}
-		{FF9C48F7-463B-4230-BB6B-2256042780C9} = {99306A7C-AB35-42FE-99A2-20732A43B066}
-		{42645E1B-FCEA-448E-8107-4DB3E49BE2C1} = {FF9C48F7-463B-4230-BB6B-2256042780C9}
 	EndGlobalSection
 EndGlobal
