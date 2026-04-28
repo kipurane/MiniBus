@@ -8,8 +8,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{3F29613F-0
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "openspec", "openspec", "{E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}"
+	ProjectSection(SolutionItems) = preProject
+		openspec\project.md = openspec\project.md
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Core", "src\MiniBus.Core\MiniBus.Core.csproj", "{DC8FD8D2-667E-40A9-8D52-1E8792447820}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
