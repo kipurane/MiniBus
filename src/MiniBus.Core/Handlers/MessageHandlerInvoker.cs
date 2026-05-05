@@ -4,7 +4,7 @@ using MiniBus.Core.Contracts;
 
 namespace MiniBus.Core.Handlers;
 
-internal sealed class MessageHandlerInvoker
+public sealed class MessageHandlerInvoker
 {
     public async Task InvokeAsync(
         object message,
@@ -46,5 +46,4 @@ internal sealed class MessageHandlerInvoker
         }
     }
 }
-
 
