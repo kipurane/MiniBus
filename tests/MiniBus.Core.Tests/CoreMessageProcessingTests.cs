@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Handlers;
+using MiniBus.Core.Recoverability;
 using MiniBus.Core.Routing;
 using MiniBus.Core.Serialization;
 using Xunit;
@@ -147,6 +148,118 @@ public sealed class CoreMessageProcessingTests
         await invoker.InvokeAsync(new TestCommand(Guid.NewGuid()), new RecordingMiniBusContext(), serviceProvider, CancellationToken.None);
     }
 
+    [Fact]
+    public void RecoverabilityDecisionMaker_ReturnsImmediateRetryWhenAttemptsRemain()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 2 };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.ImmediateRetry, decision.Kind);
+        Assert.Equal(1, decision.ImmediateAttempt);
+        Assert.Equal("1", decision.Headers[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
+        Assert.Equal("2", decision.Headers[MiniBusRecoverabilityHeaderNames.MaxImmediateAttempts]);
+        Assert.Equal("transport-message-1", decision.Headers[MiniBusRecoverabilityHeaderNames.OriginalMessageId]);
+        Assert.Equal(typeof(InvalidOperationException).FullName, decision.Headers[MiniBusRecoverabilityHeaderNames.ExceptionType]);
+        Assert.Equal("handler failed", decision.Headers[MiniBusRecoverabilityHeaderNames.ExceptionMessage]);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ReturnsDelayedRetryWhenImmediateRetriesAreExhausted()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 1 };
+        options.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+        options.DelayedRetries.Add(TimeSpan.FromMinutes(1));
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusRecoverabilityHeaderNames.ImmediateAttempt] = "1"
+        };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            headers,
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.DelayedRetry, decision.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(10), decision.Delay);
+        Assert.Equal(0, decision.ImmediateAttempt);
+        Assert.Equal(1, decision.DelayedAttempt);
+        Assert.Equal("0", decision.Headers[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
+        Assert.Equal("1", decision.Headers[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
+        Assert.Equal("2", decision.Headers[MiniBusRecoverabilityHeaderNames.MaxDelayedAttempts]);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ReturnsDelayedRetryWhenImmediateRetriesIsZero()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 0 };
+        options.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.DelayedRetry, decision.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(10), decision.Delay);
+        Assert.Equal(0, decision.ImmediateAttempt);
+        Assert.Equal(1, decision.DelayedAttempt);
+        Assert.Equal("0", decision.Headers[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
+        Assert.Equal("1", decision.Headers[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
+        Assert.Equal("0", decision.Headers[MiniBusRecoverabilityHeaderNames.MaxImmediateAttempts]);
+        Assert.Equal("1", decision.Headers[MiniBusRecoverabilityHeaderNames.MaxDelayedAttempts]);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ReturnsDeadLetterWhenRetriesAreExhausted()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 1 };
+        options.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusRecoverabilityHeaderNames.ImmediateAttempt] = "1",
+            [MiniBusRecoverabilityHeaderNames.DelayedAttempt] = "1",
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-message-1"
+        };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            headers,
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.DeadLetter, decision.Kind);
+        Assert.Equal(RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason, decision.DeadLetterReason);
+        Assert.Contains("ExceptionType=System.InvalidOperationException", decision.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("ExceptionMessage=handler failed", decision.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("ImmediateAttempt=1", decision.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("DelayedAttempt=1", decision.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("OriginalMessageId=original-message-1", decision.DeadLetterDescription, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ThrowsWhenImmediateRetriesIsNegative()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = -1 };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1"));
+    }
+
     private sealed record TestMessage(Guid Id) : IMessage;
 
     private sealed record TestCommand(Guid Id) : ICommand;
@@ -258,4 +371,3 @@ public sealed class CoreMessageProcessingTests
 
     private sealed class PlainType;
 }
-

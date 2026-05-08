@@ -1,8 +1,10 @@
 using Azure.Messaging.ServiceBus;
 using MiniBus.AzureServiceBus.Dispatching;
+using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
+using MiniBus.Core.Recoverability;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -215,6 +217,86 @@ public sealed class AzureServiceBusTransportTests
         Assert.Equal("correlation-1", message.CorrelationId);
         Assert.Equal("application/vnd.test+json", message.ContentType);
         Assert.Equal("Contracts.TestCommand", message.Subject);
+    }
+
+    [Fact]
+    public async Task DelayedRetryScheduler_SchedulesCopyWithRetryHeadersAndOriginalMetadata()
+    {
+        var sender = new RecordingSender();
+        var routes = new AzureServiceBusTransportRoutes();
+        routes.MapCommand<TestCommand>("billing-queue");
+        var scheduler = new AzureServiceBusDelayedRetryScheduler(routes, sender);
+        var dueTime = DateTimeOffset.UtcNow.AddSeconds(10);
+        var receivedMessage = ServiceBusModelFactory.ServiceBusReceivedMessage(
+            body: BinaryData.FromString("{\"id\":\"42\"}"),
+            messageId: "original-transport-message",
+            correlationId: "correlation-1",
+            contentType: "application/json",
+            properties: new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+                ["Custom"] = "custom-value"
+            });
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-transport-message",
+            [MiniBusRecoverabilityHeaderNames.ImmediateAttempt] = "0",
+            [MiniBusRecoverabilityHeaderNames.DelayedAttempt] = "1",
+            [MiniBusRecoverabilityHeaderNames.ExceptionType] = typeof(InvalidOperationException).FullName!,
+            [MiniBusRecoverabilityHeaderNames.ExceptionMessage] = "handler failed",
+            ["Custom"] = "custom-value"
+        };
+
+        var sequenceNumber = await scheduler.ScheduleRetryAsync(
+            receivedMessage,
+            typeof(TestCommand),
+            dueTime,
+            headers);
+
+        Assert.Equal(42L, sequenceNumber);
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("billing-queue", schedule.Destination);
+        Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+        Assert.Equal("{\"id\":\"42\"}", schedule.Message.Body.ToString());
+        Assert.Equal("original-transport-message", schedule.Message.MessageId);
+        Assert.Equal("correlation-1", schedule.Message.CorrelationId);
+        Assert.Equal("application/json", schedule.Message.ContentType);
+        Assert.Equal(typeof(TestCommand).AssemblyQualifiedName, schedule.Message.Subject);
+        Assert.Equal("original-transport-message", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.OriginalMessageId]);
+        Assert.Equal("0", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
+        Assert.Equal("1", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
+        Assert.Equal("handler failed", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ExceptionMessage]);
+        Assert.Equal("custom-value", schedule.Message.ApplicationProperties["Custom"]);
+    }
+
+    [Fact]
+    public async Task DelayedRetryScheduler_ThrowsHelpfulErrorWhenDestinationCannotBeResolved()
+    {
+        var sender = new RecordingSender();
+        var scheduler = new AzureServiceBusDelayedRetryScheduler(new AzureServiceBusTransportRoutes(), sender);
+        var receivedMessage = ServiceBusModelFactory.ServiceBusReceivedMessage(
+            body: BinaryData.FromString("{}"),
+            messageId: "message-1",
+            properties: new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestMessage).AssemblyQualifiedName!
+            });
+
+        var exception = await Assert.ThrowsAsync<AzureServiceBusDelayedRetryDestinationException>(
+            () => scheduler.ScheduleRetryAsync(
+                receivedMessage,
+                typeof(TestMessage),
+                DateTimeOffset.UtcNow.AddSeconds(10),
+                new Dictionary<string, string>(StringComparer.Ordinal)));
+
+        Assert.Equal(typeof(TestMessage), exception.MessageType);
+        Assert.Contains(typeof(TestMessage).FullName!, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Configure a command route, event route, or scheduled message route", exception.Message, StringComparison.Ordinal);
+        Assert.IsType<AzureServiceBusRouteNotFoundException>(exception.InnerException);
+        Assert.Empty(sender.Schedules);
     }
 
     private static AzureServiceBusTransportDispatcher CreateDispatcher(

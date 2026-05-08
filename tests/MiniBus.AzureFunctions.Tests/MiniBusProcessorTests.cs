@@ -4,11 +4,13 @@ using MiniBus.AzureFunctions.DependencyInjection;
 using MiniBus.AzureFunctions.Processing;
 using MiniBus.AzureFunctions.Settlement;
 using MiniBus.AzureServiceBus.Dispatching;
+using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Handlers;
+using MiniBus.Core.Recoverability;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -16,6 +18,8 @@ namespace MiniBus.AzureFunctions.Tests;
 
 public sealed class MiniBusProcessorTests
 {
+    private static readonly TimeSpan DelayedRetryAssertionTolerance = TimeSpan.FromSeconds(2);
+
     [Fact]
     public async Task ProcessAsync_DeserializesInvokesHandlerAndCompletesMessage()
     {
@@ -99,7 +103,7 @@ public sealed class MiniBusProcessorTests
         Assert.Empty(recorder.Invocations);
         Assert.Null(actions.CompletedMessage);
         Assert.NotNull(actions.DeadLetteredMessage);
-        Assert.Equal(MiniBusProcessor.DeadLetterReason, actions.DeadLetterReason);
+        Assert.Equal(RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason, actions.DeadLetterReason);
         Assert.Contains("metadata is missing", actions.DeadLetterDescription, StringComparison.Ordinal);
     }
 
@@ -112,6 +116,24 @@ public sealed class MiniBusProcessorTests
             () => processor.ProcessAsync(CreateMessage()));
 
         Assert.Contains("metadata is missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WithoutSettlementPropagatesOriginalHandlerException()
+    {
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>();
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => processor.ProcessAsync(message));
+
+        Assert.Equal("handler failed", exception.Message);
     }
 
     [Fact]
@@ -203,6 +225,147 @@ public sealed class MiniBusProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_RetriesHandlerImmediatelyAndCompletesWhenRetrySucceeds()
+    {
+        var recorder = new HandlerRecorder();
+        var sender = new RecordingSender();
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, SucceedsOnSecondAttemptHandler>();
+                RegisterTransport(services, sender, routes => routes.MapCommand<TestCommand>("billing-queue"));
+            },
+            options => options.Recoverability.ImmediateRetries = 1);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Equal(2, recorder.Invocations.Count);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+        Assert.Empty(sender.Schedules);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_SchedulesDelayedRetryAndCompletesOriginalWhenImmediateRetriesAreExhausted()
+    {
+        var recorder = new HandlerRecorder();
+        var sender = new RecordingSender();
+        var delayedRetryDelay = TimeSpan.FromSeconds(10);
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+                RegisterTransport(services, sender, routes => routes.MapCommand<TestCommand>("billing-queue"));
+            },
+            options =>
+            {
+                options.Recoverability.ImmediateRetries = 1;
+                options.Recoverability.DelayedRetries.Add(delayedRetryDelay);
+            });
+        var expectedDueTime = DateTimeOffset.UtcNow.Add(delayedRetryDelay);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Equal(2, recorder.Invocations.Count);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("billing-queue", schedule.Destination);
+        Assert.InRange(
+            schedule.DueTime,
+            expectedDueTime.Subtract(DelayedRetryAssertionTolerance),
+            expectedDueTime.Add(DelayedRetryAssertionTolerance));
+        Assert.Equal("message-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.MessageId]);
+        Assert.Equal("correlation-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.CorrelationId]);
+        Assert.Equal("sdk-message-id", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.OriginalMessageId]);
+        Assert.Equal("0", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
+        Assert.Equal("1", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
+        Assert.Equal("handler failed", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ExceptionMessage]);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DeadLettersWhenAllRetriesAreExhausted()
+    {
+        var recorder = new HandlerRecorder();
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+            },
+            options => options.Recoverability.ImmediateRetries = 1);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Equal(2, recorder.Invocations.Count);
+        Assert.Null(actions.CompletedMessage);
+        Assert.Same(message, actions.DeadLetteredMessage);
+        Assert.Equal(RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason, actions.DeadLetterReason);
+        Assert.Contains("ExceptionType=System.InvalidOperationException", actions.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("ExceptionMessage=handler failed", actions.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("ImmediateAttempt=1", actions.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("DelayedAttempt=0", actions.DeadLetterDescription, StringComparison.Ordinal);
+        Assert.Contains("OriginalMessageId=sdk-message-id", actions.DeadLetterDescription, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ThrowsActionableMessageWhenDelayedRetrySchedulerIsMissing()
+    {
+        var recorder = new HandlerRecorder();
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+            },
+            options =>
+            {
+                options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+            });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        });
+        var actions = new RecordingMessageActions();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => processor.ProcessAsync(message, actions));
+
+        Assert.Null(actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+        Assert.Contains("AddMiniBusAzureFunctions", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("IAzureServiceBusDelayedRetryScheduler", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("AzureServiceBusDelayedRetryScheduler", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AddMiniBusAzureFunctions_RegistersProcessor()
     {
         var services = new ServiceCollection()
@@ -218,16 +381,19 @@ public sealed class MiniBusProcessorTests
 
     private static MiniBusProcessor CreateProcessor(
         IMessageSerializer serializer,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        Action<MiniBusProcessorOptions>? configureOptions = null)
     {
         var services = new ServiceCollection();
         configureServices?.Invoke(services);
+        var options = new MiniBusProcessorOptions { EndpointName = "Billing" };
+        configureOptions?.Invoke(options);
 
         return new MiniBusProcessor(
             serializer,
             new MessageHandlerInvoker(),
             services.BuildServiceProvider(),
-            new MiniBusProcessorOptions { EndpointName = "Billing" });
+            options);
     }
 
     private static void RegisterTransport(
@@ -242,6 +408,7 @@ public sealed class MiniBusProcessorTests
         services.AddSingleton<IAzureServiceBusSender>(sender);
         services.AddSingleton(new AzureServiceBusMessageFactory(new RecordingSerializer(new object())));
         services.AddSingleton<AzureServiceBusTransportDispatcher>();
+        services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDelayedRetryScheduler>();
     }
 
     private static ServiceBusReceivedMessage CreateMessage(Dictionary<string, object>? properties = null)
@@ -289,6 +456,41 @@ public sealed class MiniBusProcessorTests
         public Task Handle(TestCommand message, MiniBusContext context, CancellationToken cancellationToken)
         {
             return Task.FromException(new InvalidOperationException("handler failed"));
+        }
+    }
+
+    private sealed class RecordingThenThrowingCommandHandler : IHandleMessages<TestCommand>
+    {
+        private readonly HandlerRecorder _recorder;
+
+        public RecordingThenThrowingCommandHandler(HandlerRecorder recorder)
+        {
+            _recorder = recorder;
+        }
+
+        public Task Handle(TestCommand message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            _recorder.Invocations.Add(new Invocation(message, context));
+            return Task.FromException(new InvalidOperationException("handler failed"));
+        }
+    }
+
+    private sealed class SucceedsOnSecondAttemptHandler : IHandleMessages<TestCommand>
+    {
+        private readonly HandlerRecorder _recorder;
+
+        public SucceedsOnSecondAttemptHandler(HandlerRecorder recorder)
+        {
+            _recorder = recorder;
+        }
+
+        public Task Handle(TestCommand message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            _recorder.Invocations.Add(new Invocation(message, context));
+
+            return _recorder.Invocations.Count == 1
+                ? Task.FromException(new InvalidOperationException("handler failed"))
+                : Task.CompletedTask;
         }
     }
 

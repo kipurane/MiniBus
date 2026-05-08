@@ -29,3 +29,19 @@ public sealed class BillingInputFunction
 ```
 
 Handlers still implement `IHandleMessages<TMessage>` from `MiniBus.Core` and receive only the deserialized message, `MiniBusContext`, and `CancellationToken`.
+
+Recoverability is configured with the Azure Functions adapter registration:
+
+```csharp
+services.AddMiniBusAzureFunctions(options =>
+{
+    options.EndpointName = "Billing";
+    options.Recoverability.ImmediateRetries = 3;
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(1));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(5));
+    options.Recoverability.DeadLetterAfterRetriesExhausted = true;
+});
+```
+
+Immediate retries run inside the same `MiniBusProcessor` invocation. Delayed retries use Azure Service Bus scheduled message copies and preserve MiniBus correlation, original message id, retry, and exception headers.
