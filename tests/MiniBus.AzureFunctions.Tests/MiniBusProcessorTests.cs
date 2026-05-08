@@ -11,6 +11,7 @@ using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Handlers;
 using MiniBus.Core.Recoverability;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -373,10 +374,68 @@ public sealed class MiniBusProcessorTests
 
         services.AddMiniBusAzureFunctions(options => options.EndpointName = "Billing");
 
-        using var provider = services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<MiniBusProcessor>());
         Assert.Equal("Billing", provider.GetRequiredService<MiniBusProcessorOptions>().EndpointName);
+        Assert.False(provider.GetRequiredService<MiniBusProcessorOptions>().EnableSagas);
+        Assert.Null(provider.GetService<SagaRegistry>());
+        Assert.IsType<UnconfiguredSagaPersistence>(provider.GetRequiredService<ISagaPersistence>());
+        Assert.Null(provider.GetService<SagaInvoker>());
+    }
+
+    [Fact]
+    public async Task ProcessAsync_InvokesSagaThroughCoreAbstractions()
+    {
+        BillingSaga.HandledCount = 0;
+        BillingSaga.LastContext = null;
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<BillingSaga, BillingSagaData>();
+        var processor = CreateProcessor(new RecordingSerializer(new StartBillingSaga("billing-1")), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(persistence);
+            services.AddSingleton<SagaInvoker>();
+        }, options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartBillingSaga).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        var stored = await persistence.LoadAsync<BillingSagaData>("billing-1");
+        Assert.NotNull(stored);
+        Assert.Equal("started", stored.Data.Step);
+        Assert.Equal(1, BillingSaga.HandledCount);
+        Assert.NotNull(BillingSaga.LastContext);
+        Assert.Equal("Billing", BillingSaga.LastContext.EndpointName);
+        Assert.Equal("message-1", BillingSaga.LastContext.MessageId);
+        Assert.Equal("correlation-1", BillingSaga.LastContext.CorrelationId);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ThrowsWhenSagasAreEnabledWithoutSagaInvoker()
+    {
+        var processor = CreateProcessor(
+            new RecordingSerializer(new StartBillingSaga("billing-1")),
+            configureOptions: options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartBillingSaga).AssemblyQualifiedName!
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => processor.ProcessAsync(message));
+
+        Assert.Contains("SagaInvoker is not configured", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(MiniBusProcessorOptions.EnableSagas), exception.Message, StringComparison.Ordinal);
     }
 
     private static MiniBusProcessor CreateProcessor(
@@ -389,11 +448,14 @@ public sealed class MiniBusProcessorTests
         var options = new MiniBusProcessorOptions { EndpointName = "Billing" };
         configureOptions?.Invoke(options);
 
+        var provider = services.BuildServiceProvider();
+
         return new MiniBusProcessor(
             serializer,
             new MessageHandlerInvoker(),
-            services.BuildServiceProvider(),
-            options);
+            provider,
+            options,
+            sagaInvoker: provider.GetService<SagaInvoker>());
     }
 
     private static void RegisterTransport(
@@ -428,12 +490,47 @@ public sealed class MiniBusProcessorTests
 
     private sealed record OutgoingMessage(Guid Id) : IMessage;
 
+    private sealed record StartBillingSaga(string BillingId) : ICommand;
+
     private sealed class HandlerRecorder
     {
         public List<Invocation> Invocations { get; } = new();
     }
 
     private sealed record Invocation(TestCommand Message, MiniBusContext Context);
+
+    private sealed class BillingSagaData : ISagaData
+    {
+        public Guid Id { get; set; }
+
+        public string CorrelationId { get; set; } = string.Empty;
+
+        public bool IsCompleted { get; set; }
+
+        public string? Step { get; set; }
+    }
+
+    private sealed class BillingSaga :
+        MiniBusSaga<BillingSagaData>,
+        IHandleSagaMessages<StartBillingSaga>
+    {
+        public static int HandledCount { get; set; }
+
+        public static MiniBusContext? LastContext { get; set; }
+
+        public override void ConfigureHowToFindSaga(SagaMapper<BillingSagaData> mapper)
+        {
+            mapper.StartsWith<StartBillingSaga>(message => message.BillingId);
+        }
+
+        public Task Handle(StartBillingSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            HandledCount++;
+            LastContext = context;
+            Data.Step = "started";
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class RecordingCommandHandler : IHandleMessages<TestCommand>
     {

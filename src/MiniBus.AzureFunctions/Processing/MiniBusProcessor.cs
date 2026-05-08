@@ -5,6 +5,7 @@ using MiniBus.AzureFunctions.Settlement;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Handlers;
 using MiniBus.Core.Recoverability;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 
 namespace MiniBus.AzureFunctions.Processing;
@@ -18,19 +19,22 @@ public sealed class MiniBusProcessor
     private readonly IServiceProvider _serviceProvider;
     private readonly MiniBusProcessorOptions _options;
     private readonly RecoverabilityDecisionMaker _recoverabilityDecisionMaker;
+    private readonly SagaInvoker? _sagaInvoker;
 
     public MiniBusProcessor(
         IMessageSerializer serializer,
         MessageHandlerInvoker handlerInvoker,
         IServiceProvider serviceProvider,
         MiniBusProcessorOptions? options = null,
-        RecoverabilityDecisionMaker? recoverabilityDecisionMaker = null)
+        RecoverabilityDecisionMaker? recoverabilityDecisionMaker = null,
+        SagaInvoker? sagaInvoker = null)
     {
         _serializer = serializer;
         _handlerInvoker = handlerInvoker;
         _serviceProvider = serviceProvider;
         _options = options ?? new MiniBusProcessorOptions();
         _recoverabilityDecisionMaker = recoverabilityDecisionMaker ?? new RecoverabilityDecisionMaker();
+        _sagaInvoker = sagaInvoker;
     }
 
     public Task ProcessAsync(
@@ -123,6 +127,20 @@ public sealed class MiniBusProcessor
         var context = CreateContext(message, headers);
 
         await _handlerInvoker
+            .InvokeAsync(deserializedMessage, context, _serviceProvider, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!_options.EnableSagas)
+        {
+            return;
+        }
+
+        if (_sagaInvoker is null)
+        {
+            throw new InvalidOperationException("MiniBus saga processing is enabled, but SagaInvoker is not configured. Register SagaRegistry, ISagaPersistence, and SagaInvoker, or set MiniBusProcessorOptions.EnableSagas to false.");
+        }
+
+        await _sagaInvoker
             .InvokeAsync(deserializedMessage, context, _serviceProvider, cancellationToken)
             .ConfigureAwait(false);
     }

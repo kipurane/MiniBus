@@ -1,0 +1,394 @@
+using MiniBus.Core.Context;
+using MiniBus.Core.Contracts;
+using MiniBus.Core.Sagas;
+using Xunit;
+
+namespace MiniBus.Core.Tests;
+
+public sealed class SagaTests
+{
+    [Fact]
+    public void SagaContracts_AttachDataAndMarkComplete()
+    {
+        var saga = new OrderSaga();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+
+        saga.AttachForTest(data);
+        saga.MarkAsComplete();
+
+        Assert.Same(data, saga.Data);
+        Assert.True(data.IsCompleted);
+    }
+
+    [Fact]
+    public async Task SagaMapper_ResolvesStartingAndContinuingCorrelation()
+    {
+        var mapper = new SagaMapper<OrderSagaData>()
+            .StartsWith<StartOrder>(message => message.OrderId)
+            .Correlate<OrderBilled>(message => message.OrderId);
+
+        Assert.True(mapper.TryGetRule(typeof(StartOrder), out var startRule));
+        Assert.True(startRule.StartsSaga);
+        Assert.Equal("order-1", await startRule.ResolveCorrelationIdAsync(
+            new StartOrder("order-1"),
+            new RecordingMiniBusContext(),
+            CancellationToken.None));
+
+        Assert.True(mapper.TryGetRule(typeof(OrderBilled), out var continueRule));
+        Assert.False(continueRule.StartsSaga);
+        Assert.Equal("order-1", await continueRule.ResolveCorrelationIdAsync(
+            new OrderBilled("order-1"),
+            new RecordingMiniBusContext(),
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SagaMapper_UsesCustomFinder()
+    {
+        var mapper = new SagaMapper<OrderSagaData>()
+            .FindWith(new OrderFinder(), startsSaga: true);
+
+        Assert.True(mapper.TryGetRule(typeof(StartOrder), out var rule));
+        Assert.Equal("found-order-1", await rule.ResolveCorrelationIdAsync(
+            new StartOrder("order-1"),
+            new RecordingMiniBusContext(),
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public void SagaMapper_ThrowsForDuplicateCorrelationMapping()
+    {
+        var mapper = new SagaMapper<OrderSagaData>()
+            .StartsWith<StartOrder>(message => message.OrderId);
+
+        var exception = Assert.Throws<SagaMappingException>(() =>
+            mapper.Correlate<StartOrder>(message => message.OrderId));
+
+        Assert.Contains(typeof(StartOrder).FullName!, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SagaRegistry_ThrowsWhenSagaHasNoMappings()
+    {
+        var registry = new SagaRegistry();
+
+        var exception = Assert.Throws<SagaMappingException>(
+            () => registry.Register<UnmappedSaga, OrderSagaData>());
+
+        Assert.Contains("must configure at least one", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_LoadCreateSaveAndComplete()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+
+        await persistence.CreateAsync(data);
+        var loaded = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(loaded);
+        Assert.NotSame(data, loaded.Data);
+        Assert.Equal(data.Id, loaded.Data.Id);
+        Assert.Equal("1", loaded.Version);
+
+        data.Step = "saved";
+        await persistence.SaveAsync(data, loaded.Version);
+        var saved = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(saved);
+        Assert.Equal("saved", saved.Data.Step);
+        Assert.Equal("2", saved.Version);
+
+        await persistence.CompleteAsync(saved.Data, saved.Version);
+        var completed = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(completed);
+        Assert.True(completed.Data.IsCompleted);
+        Assert.Equal("3", completed.Version);
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_DeepClonesReferenceTypeProperties()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Events = ["created"]
+        };
+
+        await persistence.CreateAsync(data);
+        var loaded = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(loaded);
+
+        loaded.Data.Events.Add("mutated-without-save");
+
+        var reloaded = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(reloaded);
+        Assert.Equal(["created"], reloaded.Data.Events);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_StartsNewSagaAndPersistsState()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        var invoker = CreateInvoker(persistence);
+        var context = new RecordingMiniBusContext();
+
+        await invoker.InvokeAsync(
+            new StartOrder("order-1"),
+            context,
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("started", stored.Data.Step);
+        Assert.Equal(1, OrderSaga.StartedCount);
+        Assert.Same(context, OrderSaga.LastContext);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_LoadsExistingSagaAndSavesState()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Step = "started"
+        });
+        var loadedBefore = await persistence.LoadAsync<OrderSagaData>("order-1");
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new OrderBilled("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("billed", stored.Data.Step);
+        Assert.Equal("2", stored.Version);
+        Assert.Equal("1", loadedBefore!.Version);
+        Assert.Equal(1, OrderSaga.BilledCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_DoesNotSaveStateWhenHandlerFails()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Step = "started"
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invoker.InvokeAsync(
+            new FailOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None));
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("started", stored.Data.Step);
+        Assert.Equal("1", stored.Version);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_DoesNotInvokeCompletedSaga()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            IsCompleted = true
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new OrderBilled("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        Assert.Equal(0, OrderSaga.BilledCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_CompletesSagaState()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1"
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new CompleteOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.True(stored.Data.IsCompleted);
+    }
+
+    private static SagaInvoker CreateInvoker(ISagaPersistence persistence)
+    {
+        var registry = new SagaRegistry();
+        registry.Register<OrderSaga, OrderSagaData>();
+
+        return new SagaInvoker(registry, persistence);
+    }
+
+    private static void ResetSagaCounters()
+    {
+        OrderSaga.StartedCount = 0;
+        OrderSaga.BilledCount = 0;
+        OrderSaga.LastContext = null;
+    }
+
+    private sealed record StartOrder(string OrderId) : ICommand;
+
+    private sealed record OrderBilled(string OrderId) : IEvent;
+
+    private sealed record FailOrder(string OrderId) : IEvent;
+
+    private sealed record CompleteOrder(string OrderId) : IEvent;
+
+    private sealed class OrderSagaData : ISagaData
+    {
+        public Guid Id { get; set; }
+
+        public string CorrelationId { get; set; } = string.Empty;
+
+        public bool IsCompleted { get; set; }
+
+        public string? Step { get; set; }
+
+        public List<string> Events { get; set; } = new();
+    }
+
+    private sealed class OrderSaga :
+        MiniBusSaga<OrderSagaData>,
+        IHandleSagaMessages<StartOrder>,
+        IHandleSagaMessages<OrderBilled>,
+        IHandleSagaMessages<FailOrder>,
+        IHandleSagaMessages<CompleteOrder>
+    {
+        public static int StartedCount { get; set; }
+
+        public static int BilledCount { get; set; }
+
+        public static MiniBusContext? LastContext { get; set; }
+
+        public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
+        {
+            mapper.StartsWith<StartOrder>(message => message.OrderId)
+                .Correlate<OrderBilled>(message => message.OrderId)
+                .Correlate<FailOrder>(message => message.OrderId)
+                .Correlate<CompleteOrder>(message => message.OrderId);
+        }
+
+        public Task Handle(StartOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            StartedCount++;
+            LastContext = context;
+            Data.Step = "started";
+            return Task.CompletedTask;
+        }
+
+        public Task Handle(OrderBilled message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            BilledCount++;
+            Data.Step = "billed";
+            return Task.CompletedTask;
+        }
+
+        public Task Handle(FailOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Step = "failed";
+            return Task.FromException(new InvalidOperationException("saga failed"));
+        }
+
+        public Task Handle(CompleteOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            MarkAsComplete();
+            return Task.CompletedTask;
+        }
+
+        public void AttachForTest(OrderSagaData data)
+        {
+            AttachData(data);
+        }
+    }
+
+    private sealed class UnmappedSaga : MiniBusSaga<OrderSagaData>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
+        {
+        }
+    }
+
+    private sealed class OrderFinder : ISagaFinder<StartOrder, OrderSagaData>
+    {
+        public Task<string?> FindCorrelationId(StartOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<string?>($"found-{message.OrderId}");
+        }
+    }
+
+    private sealed class RecordingMiniBusContext : MiniBusContext
+    {
+        public override string EndpointName => "Tests";
+
+        public override string MessageId => "message-id";
+
+        public override string CorrelationId => "correlation-id";
+
+        public override string? CausationId => "causation-id";
+
+        public override IReadOnlyDictionary<string, string> Headers { get; } = new Dictionary<string, string>
+        {
+            ["Custom"] = "custom-value"
+        };
+
+        public override Task Send<TCommand>(TCommand command, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public override Task Publish<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public override Task Schedule<TMessage>(TMessage message, DateTimeOffset dueTime, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class EmptyServiceProvider : IServiceProvider
+    {
+        public static EmptyServiceProvider Instance { get; } = new();
+
+        public object? GetService(Type serviceType)
+        {
+            return null;
+        }
+    }
+}

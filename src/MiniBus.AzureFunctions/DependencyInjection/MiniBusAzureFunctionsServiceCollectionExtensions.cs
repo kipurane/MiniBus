@@ -3,6 +3,7 @@ using MiniBus.AzureFunctions.Processing;
 using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.Core.Handlers;
 using MiniBus.Core.Recoverability;
+using MiniBus.Core.Sagas;
 
 namespace MiniBus.AzureFunctions.DependencyInjection;
 
@@ -20,8 +21,15 @@ public static class MiniBusAzureFunctionsServiceCollectionExtensions
         services.AddSingleton(options);
         services.AddSingleton<MessageHandlerInvoker>();
         services.AddSingleton<RecoverabilityDecisionMaker>();
+        services.AddSingleton<ISagaPersistence, UnconfiguredSagaPersistence>();
         services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDelayedRetryScheduler>();
-        services.AddSingleton<MiniBusProcessor>();
+        services.AddSingleton(serviceProvider => new MiniBusProcessor(
+            serviceProvider.GetRequiredService<MiniBus.Core.Serialization.IMessageSerializer>(),
+            serviceProvider.GetRequiredService<MessageHandlerInvoker>(),
+            serviceProvider,
+            serviceProvider.GetRequiredService<MiniBusProcessorOptions>(),
+            serviceProvider.GetRequiredService<RecoverabilityDecisionMaker>(),
+            serviceProvider.GetService<SagaInvoker>()));
 
         return services;
     }
