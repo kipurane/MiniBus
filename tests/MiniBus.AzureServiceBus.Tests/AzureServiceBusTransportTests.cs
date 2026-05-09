@@ -4,6 +4,7 @@ using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
+using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Serialization;
 using Xunit;
@@ -132,6 +133,59 @@ public sealed class AzureServiceBusTransportTests
         var sequenceNumber = await dispatcher.ScheduleAsync(new TestCommand(Guid.NewGuid()), dueTime);
 
         Assert.Equal(42L, sequenceNumber);
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("billing-queue", schedule.Destination);
+        Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+    }
+
+    [Fact]
+    public async Task Dispatcher_DispatchesPersistedOutboxOperationWithStoredHeaders()
+    {
+        var sender = new RecordingSender();
+        var dispatcher = CreateDispatcher(sender, routes =>
+            routes.MapCommand<TestCommand>("billing-queue"));
+        var operation = new MiniBusOutboxStoredOperation(
+            Guid.NewGuid(),
+            MiniBusOutboxOperationKind.Send,
+            BinaryData.FromString("{\"id\":\"42\"}"),
+            typeof(TestCommand),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [MiniBusHeaderNames.MessageId] = "outbox-message-1",
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+                [MiniBusHeaderNames.CausationId] = "incoming-message-1"
+            },
+            DueTime: null,
+            AttemptCount: 1);
+
+        await dispatcher.DispatchAsync(operation);
+
+        var send = Assert.Single(sender.Sends);
+        Assert.Equal("billing-queue", send.Destination);
+        Assert.Equal("{\"id\":\"42\"}", send.Message.Body.ToString());
+        Assert.Equal("outbox-message-1", send.Message.MessageId);
+        Assert.Equal("correlation-1", send.Message.CorrelationId);
+        Assert.Equal("incoming-message-1", send.Message.ApplicationProperties[MiniBusHeaderNames.CausationId]);
+    }
+
+    [Fact]
+    public async Task Dispatcher_DispatchesPersistedScheduledOperationWithDueTime()
+    {
+        var sender = new RecordingSender();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(15);
+        var dispatcher = CreateDispatcher(sender, routes =>
+            routes.MapCommand<TestCommand>("billing-queue"));
+        var operation = new MiniBusOutboxStoredOperation(
+            Guid.NewGuid(),
+            MiniBusOutboxOperationKind.Schedule,
+            BinaryData.FromString("{}"),
+            typeof(TestCommand),
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            dueTime,
+            AttemptCount: 1);
+
+        await dispatcher.DispatchAsync(operation);
+
         var schedule = Assert.Single(sender.Schedules);
         Assert.Equal("billing-queue", schedule.Destination);
         Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);

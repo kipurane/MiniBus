@@ -37,6 +37,23 @@ public sealed class AzureServiceBusMessageFactory
         return serviceBusMessage;
     }
 
+    public ServiceBusMessage CreateMessage(
+        BinaryData body,
+        Type messageType,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(messageType);
+
+        var mappedHeaders = CreateHeaders(messageType, headers);
+        var serviceBusMessage = new ServiceBusMessage(body);
+
+        AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, mappedHeaders);
+        ApplySystemProperties(serviceBusMessage, mappedHeaders);
+
+        return serviceBusMessage;
+    }
+
     private static Dictionary<string, string> CreateHeaders(
         Type messageType,
         IReadOnlyDictionary<string, string>? headers)

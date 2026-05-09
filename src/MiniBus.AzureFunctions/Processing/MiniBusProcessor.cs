@@ -4,6 +4,7 @@ using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureFunctions.Settlement;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Handlers;
+using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
@@ -74,7 +75,8 @@ public sealed class MiniBusProcessor
                 await actions.CompleteMessageAsync(message, cancellationToken).ConfigureAwait(false);
                 return;
             }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (exception is not MiniBusPersistenceCommitException
+                                             && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
             {
                 var decision = _recoverabilityDecisionMaker.Decide(
                     headers,
@@ -122,10 +124,77 @@ public sealed class MiniBusProcessor
         IReadOnlyDictionary<string, string> headers,
         CancellationToken cancellationToken)
     {
+        var persistenceSessionFactory = GetPersistenceSessionFactory();
+
+        if (persistenceSessionFactory is not null)
+        {
+            await ProcessCoreWithPersistenceAsync(
+                    persistenceSessionFactory,
+                    message,
+                    headers,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
         var messageType = ResolveMessageType(headers);
         var deserializedMessage = _serializer.Deserialize(message.Body, messageType);
         var context = CreateContext(message, headers);
 
+        await InvokeHandlersAndSagasAsync(deserializedMessage, context, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task ProcessCoreWithPersistenceAsync(
+        IMiniBusPersistenceSessionFactory persistenceSessionFactory,
+        ServiceBusReceivedMessage message,
+        IReadOnlyDictionary<string, string> headers,
+        CancellationToken cancellationToken)
+    {
+        await using var session = await persistenceSessionFactory.CreateAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var inboxMessage = CreateInboxMessage(message, headers);
+
+        if (_options.Persistence.EnableInbox
+            && await session.IsProcessedAsync(inboxMessage, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var outboxCollector = _options.Persistence.EnableOutbox
+            ? new MiniBusOutboxOperationCollector()
+            : null;
+        var messageType = ResolveMessageType(headers);
+        var deserializedMessage = _serializer.Deserialize(message.Body, messageType);
+        var context = CreateContext(message, headers, outboxCollector);
+
+        await InvokeHandlersAndSagasAsync(deserializedMessage, context, cancellationToken)
+            .ConfigureAwait(false);
+
+        IReadOnlyCollection<MiniBusOutboxOperation> outboxOperations = outboxCollector is null
+            ? Array.Empty<MiniBusOutboxOperation>()
+            : outboxCollector.Operations;
+
+        try
+        {
+            await session
+                .CommitAsync(
+                    inboxMessage,
+                    outboxOperations,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            throw new MiniBusPersistenceCommitException("MiniBus persistence commit failed.", exception);
+        }
+    }
+
+    private async Task InvokeHandlersAndSagasAsync(
+        object deserializedMessage,
+        MiniBusReceivedMessageContext context,
+        CancellationToken cancellationToken)
+    {
         await _handlerInvoker
             .InvokeAsync(deserializedMessage, context, _serviceProvider, cancellationToken)
             .ConfigureAwait(false);
@@ -143,6 +212,11 @@ public sealed class MiniBusProcessor
         await _sagaInvoker
             .InvokeAsync(deserializedMessage, context, _serviceProvider, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private IMiniBusPersistenceSessionFactory? GetPersistenceSessionFactory()
+    {
+        return _serviceProvider.GetService(typeof(IMiniBusPersistenceSessionFactory)) as IMiniBusPersistenceSessionFactory;
     }
 
     private async Task ScheduleDelayedRetryAsync(
@@ -228,7 +302,8 @@ public sealed class MiniBusProcessor
 
     private MiniBusReceivedMessageContext CreateContext(
         ServiceBusReceivedMessage message,
-        IReadOnlyDictionary<string, string> headers)
+        IReadOnlyDictionary<string, string> headers,
+        MiniBusOutboxOperationCollector? outboxCollector = null)
     {
         var messageId = GetHeaderOrValue(headers, MiniBusHeaderNames.MessageId, message.MessageId);
         var correlationId = GetHeaderOrValue(headers, MiniBusHeaderNames.CorrelationId, message.CorrelationId);
@@ -242,7 +317,32 @@ public sealed class MiniBusProcessor
             correlationId,
             causationId,
             headers,
-            _serviceProvider);
+            _serviceProvider,
+            outboxCollector);
+    }
+
+    private MiniBusInboxMessage CreateInboxMessage(
+        ServiceBusReceivedMessage message,
+        IReadOnlyDictionary<string, string> headers)
+    {
+        return new MiniBusInboxMessage(
+            _options.EndpointName,
+            GetLogicalMessageId(message, headers),
+            headers,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static string GetLogicalMessageId(
+        ServiceBusReceivedMessage message,
+        IReadOnlyDictionary<string, string> headers)
+    {
+        if (headers.TryGetValue(MiniBusRecoverabilityHeaderNames.OriginalMessageId, out var originalMessageId)
+            && !string.IsNullOrWhiteSpace(originalMessageId))
+        {
+            return originalMessageId;
+        }
+
+        return GetHeaderOrValue(headers, MiniBusHeaderNames.MessageId, message.MessageId);
     }
 
     private static string GetHeaderOrValue(

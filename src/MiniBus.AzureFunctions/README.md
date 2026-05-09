@@ -88,3 +88,26 @@ services.AddSingleton<SagaInvoker>();
 ```
 
 `AddMiniBusAzureFunctions` does not register `SagaRegistry` or `SagaInvoker` by default; saga processing is opt-in through `MiniBusProcessorOptions.EnableSagas`. It registers an `UnconfiguredSagaPersistence` placeholder so production apps must choose a real saga store explicitly. `InMemorySagaPersistence` is intended for tests and samples. Production SQL saga persistence is deferred until the SQL persistence package exists.
+
+## SQL inbox and outbox persistence
+
+SQL inbox/outbox persistence is opt-in through `MiniBus.Persistence.Sql`. The current package uses provider-neutral ADO.NET APIs and expects the application to provide the concrete `DbConnection` factory. First-class SQL Server/Azure SQL packaging with `Microsoft.Data.SqlClient` and connection-string-only registration is planned as a follow-up.
+
+```csharp
+services.AddMiniBusAzureFunctions(options =>
+{
+    options.EndpointName = "Billing";
+});
+
+services.AddMiniBusSqlPersistence(options =>
+{
+    options.ConnectionFactory = () => CreateSqlConnection();
+    options.DispatcherBatchSize = 100;
+});
+```
+
+Run `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` before enabling the package. The schema creates `MiniBus.Inbox` for processed-message ids and `MiniBus.Outbox` for pending outgoing send, publish, and schedule operations.
+
+When SQL persistence is registered, `MiniBusProcessor` checks the inbox before invoking handlers. Duplicate messages are completed without invoking handlers again. Successful processing commits the inbox record and captured outbox operations before completing the received Service Bus message. If the SQL commit fails, the message is not completed and the failure is propagated to the host.
+
+Outgoing operations are at-least-once. The SQL outbox dispatcher claims a bounded batch of pending operations, dispatches them through the configured transport, then marks successful rows dispatched. If a process exits after Service Bus accepts a message but before the row is marked dispatched, the operation can be sent again; receivers should keep idempotent handlers and inbox persistence enabled.

@@ -1171,6 +1171,7 @@ This phase should land before production inbox/outbox and observability so those
 Implement:
 
 - SQL connection abstraction.
+- First-class SQL Server/Azure SQL provider support with `Microsoft.Data.SqlClient`, connection-string registration, and SQL Server-backed integration tests.
 - Transaction boundary shared by MiniBus persistence and business data where configured.
 - Inbox table.
 - Outbox table.
@@ -1214,7 +1215,7 @@ Implement:
 
 This list is the updateable checklist of work still needed for MiniBus to become a fully operational framework. Keep it current as OpenSpec changes are proposed, implemented, and archived.
 
-Next major framework feature: **SQL persistence: inbox/outbox**. The processing pipeline refactor may be useful enabling work, but SQL-backed inbox/outbox is the largest missing production reliability capability.
+Next major framework feature: **first-class SQL Server/Azure SQL support for `MiniBus.Persistence.Sql`**. The current inbox/outbox implementation is sufficient as a provider-neutral foundation because applications can supply a `DbConnection` factory; the remaining work is to make SQL Server/Azure SQL turnkey and prove it with real SQL integration tests.
 
 ### 24.1 Core and processing architecture
 
@@ -1225,19 +1226,22 @@ Next major framework feature: **SQL persistence: inbox/outbox**. The processing 
 
 ### 24.2 SQL persistence and production reliability
 
-- [ ] Create `MiniBus.Persistence.Sql`.
-- [ ] Add a SQL connection/transaction abstraction.
+- [x] Create `MiniBus.Persistence.Sql`.
+- [x] Add a provider-neutral SQL connection/session abstraction based on caller-provided `DbConnection`.
+- [ ] Add first-class SQL Server/Azure SQL provider support with `Microsoft.Data.SqlClient`.
+- [ ] Add connection-string-based registration for SQL Server/Azure SQL while preserving the existing `DbConnection` factory escape hatch.
 - [ ] Define how MiniBus persistence shares a transaction boundary with business data when configured.
-- [ ] Implement inbox table schema and duplicate-message detection.
-- [ ] Complete duplicate messages without re-running business handlers.
-- [ ] Implement outbox table schema.
-- [ ] Capture outgoing `Send`, `Publish`, and `Schedule` operations into the outbox.
-- [ ] Dispatch pending outbox operations after successful processing.
+- [x] Implement inbox table schema and duplicate-message detection.
+- [x] Complete duplicate messages without re-running business handlers.
+- [x] Implement outbox table schema.
+- [x] Capture outgoing `Send`, `Publish`, and `Schedule` operations into the outbox.
+- [x] Dispatch pending outbox operations after successful processing.
 - [ ] Add deterministic outgoing message IDs for replay-safe outbox dispatch.
-- [ ] Mark outbox operations as dispatched and support recovery after process crashes.
+- [x] Mark outbox operations as dispatched and support retry metadata after dispatch failures.
+- [ ] Harden outbox crash recovery semantics with SQL Server/Azure SQL integration coverage.
 - [ ] Add cleanup and expiry policy for inbox/outbox records.
 - [ ] Decide whether migrations are framework-owned or shipped as SQL scripts.
-- [ ] Add SQL integration tests for inbox, outbox capture, outbox replay, transaction behavior, and cleanup.
+- [ ] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
 
 ### 24.3 Saga follow-ups
 

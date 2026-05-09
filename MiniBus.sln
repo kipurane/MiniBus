@@ -27,6 +27,32 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.AzureFunctions", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.AzureFunctions.Tests", "tests\MiniBus.AzureFunctions.Tests\MiniBus.AzureFunctions.Tests.csproj", "{E44A16AC-8B09-4FE6-B6BB-8C87F5D41319}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{06CC6B02-890E-4302-866B-EF20BBFE700C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "MiniBus.Samples.FunctionApp", "MiniBus.Samples.FunctionApp", "{FA1E4643-A391-4C9E-9A77-81C6F619DA11}"
+	ProjectSection(SolutionItems) = preProject
+		samples\MiniBus.Samples.FunctionApp\BillingInputFunction.cs = samples\MiniBus.Samples.FunctionApp\BillingInputFunction.cs
+		samples\MiniBus.Samples.FunctionApp\MiniBusFunctionAppConfiguration.cs = samples\MiniBus.Samples.FunctionApp\MiniBusFunctionAppConfiguration.cs
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Sagas", "Sagas", "{AA08CCA2-4629-4A35-B46E-2F384F78B501}"
+	ProjectSection(SolutionItems) = preProject
+		samples\MiniBus.Samples.FunctionApp\Sagas\BillingSaga.cs = samples\MiniBus.Samples.FunctionApp\Sagas\BillingSaga.cs
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Persistence.Sql", "src\MiniBus.Persistence.Sql\MiniBus.Persistence.Sql.csproj", "{8B549F5E-2047-4FFA-A45A-916F372F32B0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Persistence.Sql.Tests", "tests\MiniBus.Persistence.Sql.Tests\MiniBus.Persistence.Sql.Tests.csproj", "{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "changes", "changes", "{4220A156-3990-40AA-9B10-1102709C68B1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "specs", "specs", "{10553EE7-71EC-427E-9D54-81E4681E1CD6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "archive", "archive", "{766648AC-F684-4FEF-BA92-EAADBA49B25E}"
+	ProjectSection(SolutionItems) = preProject
+		openspec\changes\archive\2026-05-08-add-basic-saga-support\tasks.md = openspec\changes\archive\2026-05-08-add-basic-saga-support\tasks.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -109,6 +135,30 @@ Global
 		{E44A16AC-8B09-4FE6-B6BB-8C87F5D41319}.Release|x64.Build.0 = Release|Any CPU
 		{E44A16AC-8B09-4FE6-B6BB-8C87F5D41319}.Release|x86.ActiveCfg = Release|Any CPU
 		{E44A16AC-8B09-4FE6-B6BB-8C87F5D41319}.Release|x86.Build.0 = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|x64.Build.0 = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Debug|x86.Build.0 = Debug|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|x64.ActiveCfg = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|x64.Build.0 = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|x86.ActiveCfg = Release|Any CPU
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0}.Release|x86.Build.0 = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|x64.Build.0 = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Debug|x86.Build.0 = Debug|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|x64.ActiveCfg = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|x64.Build.0 = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|x86.ActiveCfg = Release|Any CPU
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -120,5 +170,12 @@ Global
 		{409728D3-D6FE-4356-AFE3-8923F5E4E353} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
 		{095BC85E-1699-464B-B6B3-EC186F4E684F} = {5AB2733C-61E3-4E08-9A37-03783C1012D1}
 		{E44A16AC-8B09-4FE6-B6BB-8C87F5D41319} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
+		{FA1E4643-A391-4C9E-9A77-81C6F619DA11} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
+		{AA08CCA2-4629-4A35-B46E-2F384F78B501} = {FA1E4643-A391-4C9E-9A77-81C6F619DA11}
+		{8B549F5E-2047-4FFA-A45A-916F372F32B0} = {5AB2733C-61E3-4E08-9A37-03783C1012D1}
+		{CFBC43E7-177E-4CBB-8B69-EACF3DA267CA} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
+		{4220A156-3990-40AA-9B10-1102709C68B1} = {E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}
+		{10553EE7-71EC-427E-9D54-81E4681E1CD6} = {E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}
+		{766648AC-F684-4FEF-BA92-EAADBA49B25E} = {4220A156-3990-40AA-9B10-1102709C68B1}
 	EndGlobalSection
 EndGlobal

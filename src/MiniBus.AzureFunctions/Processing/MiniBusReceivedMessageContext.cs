@@ -2,6 +2,7 @@ using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
+using MiniBus.Core.Persistence;
 
 namespace MiniBus.AzureFunctions.Processing;
 
@@ -9,6 +10,7 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
 {
     private readonly IReadOnlyDictionary<string, string> _headers;
     private readonly IServiceProvider _serviceProvider;
+    private readonly MiniBusOutboxOperationCollector? _outboxCollector;
 
     public MiniBusReceivedMessageContext(
         string endpointName,
@@ -16,7 +18,8 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
         string correlationId,
         string? causationId,
         IReadOnlyDictionary<string, string> headers,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        MiniBusOutboxOperationCollector? outboxCollector = null)
     {
         EndpointName = endpointName;
         MessageId = messageId;
@@ -24,6 +27,7 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
         CausationId = causationId;
         _headers = headers;
         _serviceProvider = serviceProvider;
+        _outboxCollector = outboxCollector;
     }
 
     public override string EndpointName { get; }
@@ -38,16 +42,52 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
 
     public override Task Send<TCommand>(TCommand command, CancellationToken cancellationToken = default)
     {
+        if (_outboxCollector is not null)
+        {
+            _outboxCollector.Add(new MiniBusOutboxOperation(
+                MiniBusOutboxOperationKind.Send,
+                command,
+                typeof(TCommand),
+                CreateOutgoingHeaders(),
+                DueTime: null));
+
+            return Task.CompletedTask;
+        }
+
         return GetDispatcher().SendAsync(command, CreateOutgoingHeaders(), cancellationToken);
     }
 
     public override Task Publish<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
     {
+        if (_outboxCollector is not null)
+        {
+            _outboxCollector.Add(new MiniBusOutboxOperation(
+                MiniBusOutboxOperationKind.Publish,
+                @event,
+                typeof(TEvent),
+                CreateOutgoingHeaders(),
+                DueTime: null));
+
+            return Task.CompletedTask;
+        }
+
         return GetDispatcher().PublishAsync(@event, CreateOutgoingHeaders(), cancellationToken);
     }
 
     public override async Task Schedule<TMessage>(TMessage message, DateTimeOffset dueTime, CancellationToken cancellationToken = default)
     {
+        if (_outboxCollector is not null)
+        {
+            _outboxCollector.Add(new MiniBusOutboxOperation(
+                MiniBusOutboxOperationKind.Schedule,
+                message,
+                typeof(TMessage),
+                CreateOutgoingHeaders(),
+                dueTime));
+
+            return;
+        }
+
         await GetDispatcher()
             .ScheduleAsync(message, dueTime, CreateOutgoingHeaders(), cancellationToken)
             .ConfigureAwait(false);

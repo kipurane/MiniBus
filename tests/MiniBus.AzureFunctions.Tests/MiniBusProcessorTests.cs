@@ -10,6 +10,7 @@ using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Handlers;
+using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
@@ -44,7 +45,7 @@ public sealed class MiniBusProcessorTests
             [MiniBusHeaderNames.MessageId] = "message-1",
             [MiniBusHeaderNames.CorrelationId] = "correlation-1",
             ["Custom"] = "custom-value",
-            ["MiniBus.CausationId"] = "causation-1"
+            [MiniBusHeaderNames.CausationId] = "causation-1"
         });
         var actions = new RecordingMessageActions();
 
@@ -438,6 +439,105 @@ public sealed class MiniBusProcessorTests
         Assert.Contains(nameof(MiniBusProcessorOptions.EnableSagas), exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProcessAsync_CompletesDuplicateSqlInboxMessageWithoutInvokingHandlers()
+    {
+        var recorder = new HandlerRecorder();
+        var session = new RecordingPersistenceSession { IsProcessed = true };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-message"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Empty(recorder.Invocations);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Equal("original-message", session.CheckedMessage?.MessageId);
+        Assert.Null(session.CommittedMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WithSqlOutboxCapturesOperationsAndCommitsBeforeCompleting()
+    {
+        var recorder = new HandlerRecorder();
+        var sender = new RecordingSender();
+        var session = new RecordingPersistenceSession();
+        var actions = new RecordingMessageActions();
+        session.OnCommit = () => Assert.Null(actions.CompletedMessage);
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, SendingCommandHandler>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+            RegisterTransport(services, sender, routes =>
+            {
+                routes.MapCommand<OutgoingCommand>("outgoing-command-queue");
+                routes.MapEvent<OutgoingEvent>("outgoing-events");
+                routes.MapScheduledMessage<OutgoingMessage>("scheduled-messages");
+            });
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Single(recorder.Invocations);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.NotNull(session.CommittedMessage);
+        Assert.Equal("message-1", session.CommittedMessage.MessageId);
+        Assert.Equal(3, session.CommittedOperations.Count);
+        Assert.Contains(session.CommittedOperations, operation => operation.Kind == MiniBusOutboxOperationKind.Send);
+        Assert.Contains(session.CommittedOperations, operation => operation.Kind == MiniBusOutboxOperationKind.Publish);
+        Assert.Contains(session.CommittedOperations, operation => operation.Kind == MiniBusOutboxOperationKind.Schedule);
+        Assert.All(session.CommittedOperations, operation =>
+        {
+            Assert.Equal("message-1", operation.Headers[MiniBusHeaderNames.CausationId]);
+            Assert.Equal("correlation-1", operation.Headers[MiniBusHeaderNames.CorrelationId]);
+        });
+        Assert.Empty(sender.Sends);
+        Assert.Empty(sender.Schedules);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WithSqlCommitFailureDoesNotCompleteIncomingMessage()
+    {
+        var session = new RecordingPersistenceSession
+        {
+            CommitException = new InvalidOperationException("commit failed")
+        };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        });
+        var actions = new RecordingMessageActions();
+
+        var exception = await Assert.ThrowsAsync<MiniBusPersistenceCommitException>(
+            () => processor.ProcessAsync(message, actions));
+
+        Assert.Equal("commit failed", exception.InnerException?.Message);
+        Assert.Null(actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+    }
+
     private static MiniBusProcessor CreateProcessor(
         IMessageSerializer serializer,
         Action<IServiceCollection>? configureServices = null,
@@ -672,6 +772,66 @@ public sealed class MiniBusProcessorTests
             DeadLetterReason = deadLetterReason;
             DeadLetterDescription = deadLetterErrorDescription;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingPersistenceSessionFactory : IMiniBusPersistenceSessionFactory
+    {
+        private readonly RecordingPersistenceSession _session;
+
+        public RecordingPersistenceSessionFactory(RecordingPersistenceSession session)
+        {
+            _session = session;
+        }
+
+        public ValueTask<IMiniBusPersistenceSession> CreateAsync(CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult<IMiniBusPersistenceSession>(_session);
+        }
+    }
+
+    private sealed class RecordingPersistenceSession : IMiniBusPersistenceSession
+    {
+        public bool IsProcessed { get; init; }
+
+        public MiniBusInboxMessage? CheckedMessage { get; private set; }
+
+        public MiniBusInboxMessage? CommittedMessage { get; private set; }
+
+        public List<MiniBusOutboxOperation> CommittedOperations { get; } = new();
+
+        public Exception? CommitException { get; init; }
+
+        public Action? OnCommit { get; set; }
+
+        public Task<bool> IsProcessedAsync(
+            MiniBusInboxMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            CheckedMessage = message;
+            return Task.FromResult(IsProcessed);
+        }
+
+        public Task CommitAsync(
+            MiniBusInboxMessage message,
+            IReadOnlyCollection<MiniBusOutboxOperation> outboxOperations,
+            CancellationToken cancellationToken = default)
+        {
+            OnCommit?.Invoke();
+
+            if (CommitException is not null)
+            {
+                return Task.FromException(CommitException);
+            }
+
+            CommittedMessage = message;
+            CommittedOperations.AddRange(outboxOperations);
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
         }
     }
 
