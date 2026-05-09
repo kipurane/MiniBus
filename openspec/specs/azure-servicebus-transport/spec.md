@@ -1,7 +1,7 @@
 # azure-servicebus-transport Specification
 
 ## Purpose
-TBD - created by archiving change add-azure-servicebus-transport. Update Purpose after archive.
+Defines Azure Service Bus transport dispatch for MiniBus send, publish, schedule, message envelope creation, routing, and header mapping while keeping handler-facing APIs transport agnostic.
 ## Requirements
 ### Requirement: Azure Service Bus transport package isolates Azure SDK dependencies
 The Azure Service Bus transport SHALL provide MiniBus dispatch capabilities in a package that depends on `MiniBus.Core` and Azure Service Bus SDK types without requiring application handlers to reference Azure Service Bus APIs.
@@ -112,4 +112,3 @@ The Azure Service Bus transport SHALL include unit tests for routing, dispatch, 
 #### Scenario: Message creation tests inspect SDK message objects
 - **WHEN** unit tests validate body and header mapping behavior
 - **THEN** they inspect created `ServiceBusMessage` instances directly
-

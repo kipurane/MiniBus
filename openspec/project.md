@@ -22,8 +22,8 @@ MiniBus should provide:
 - Azure Functions trigger adapter.
 - Message headers, correlation, and causation.
 - Recoverability with immediate retries, delayed retries, and dead-lettering.
-- SQL-backed inbox and outbox.
-- Optional saga/state-machine support.
+- SQL-backed inbox and outbox for production reliability.
+- Optional saga/state-machine support, with core abstractions before production persistence.
 - Optional Azure Storage support for large payloads and low-cost metadata.
 - Observability through structured logging and OpenTelemetry-friendly activities.
 
@@ -77,9 +77,9 @@ Apply pipeline behaviors
         ↓
 Invoke application handlers
         ↓
-Persist inbox/outbox/saga state
+Persist inbox/outbox/saga state when configured
         ↓
-Dispatch outgoing messages
+Dispatch outgoing messages directly or through an outbox
         ↓
 Complete, abandon, defer, schedule retry, or dead-letter
 ```
@@ -133,7 +133,7 @@ Complete, abandon, defer, schedule retry, or dead-letter
 
 ## 5. Project/package layout
 
-Recommended solution structure:
+Target solution structure. The current MVP contains the core, Azure Service Bus, Azure Functions, and test projects; persistence, observability, testing helpers, and additional samples are planned phases.
 
 ```text
 MiniBus.sln
@@ -353,6 +353,7 @@ Important design decision:
 - `Send`, `Publish`, and `Schedule` do not necessarily send immediately.
 - When outbox is enabled, outgoing operations are captured and persisted first.
 - Dispatching happens after successful business processing.
+- Until the outbox package exists, the Azure Functions adapter dispatches outgoing operations directly through the Azure Service Bus transport.
 
 ---
 
@@ -375,8 +376,11 @@ MiniBus.OriginatingEndpoint
 MiniBus.OriginatingMachine
 MiniBus.ContentType
 MiniBus.SchemaVersion
-MiniBus.Retry.Attempt
+MiniBus.Retry.ImmediateAttempt
 MiniBus.Retry.DelayedAttempt
+MiniBus.Retry.MaxImmediateAttempts
+MiniBus.Retry.MaxDelayedAttempts
+MiniBus.OriginalMessageId
 MiniBus.Exception.Type
 MiniBus.Exception.Message
 MiniBus.Exception.StackTraceHash
@@ -499,13 +503,11 @@ public sealed class BillingFunction
         [ServiceBusTrigger("billing-queue", Connection = "ServiceBus")]
         ServiceBusReceivedMessage message,
         ServiceBusMessageActions actions,
-        FunctionContext functionContext,
         CancellationToken cancellationToken)
     {
         return _processor.ProcessAsync(
             message,
             actions,
-            functionContext,
             cancellationToken);
     }
 }
@@ -524,7 +526,9 @@ Preferred developer experience for later phase:
 
 ## 12. Processing pipeline
 
-MiniBus should use a pipeline model.
+MiniBus should use a pipeline model before production inbox, outbox, observability, and richer recoverability behavior are layered in.
+
+Current MVP processing is still partly orchestrated directly by `MiniBusProcessor`: receive metadata is adapted, the message is deserialized, regular handlers run, optional saga handlers run, recoverability decides failures, and settlement is applied. The pipeline below is the target refactor that should make those responsibilities independently testable.
 
 ```csharp
 public delegate Task MiniBusPipelineDelegate();
@@ -606,8 +610,10 @@ Increment MiniBus.Retry.DelayedAttempt
   ↓
 Schedule message for later
   ↓
-Complete or dead-letter original depending on policy
+Complete original after the retry copy is accepted
 ```
+
+If delayed retry scheduling or completion fails, the processor should propagate the failure to the host. Stronger atomicity between retry scheduling, business state, and settlement requires the SQL inbox/outbox phase.
 
 ### 13.3 Dead-lettering
 
@@ -744,6 +750,12 @@ Crash after mark dispatched but before incoming complete:
 ## 16. Saga support
 
 Sagas are long-running workflows with persisted state.
+
+Current MVP status:
+
+- Core saga contracts, explicit correlation, saga invocation, and persistence abstractions exist.
+- `InMemorySagaPersistence` is intended for tests and samples only.
+- Production saga persistence is deferred until `MiniBus.Persistence.Sql` or another production persistence package exists.
 
 Initial saga abstraction:
 
@@ -895,7 +907,22 @@ Activity: MiniBus.Process
 
 ## 20. Configuration model
 
-Example:
+Current MVP registration shape:
+
+```csharp
+services.AddMiniBusAzureFunctions(options =>
+{
+    options.EndpointName = "Billing";
+    options.EnableSagas = true;
+    options.Recoverability.ImmediateRetries = 3;
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(1));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(5));
+    options.Recoverability.DeadLetterAfterRetriesExhausted = true;
+});
+```
+
+Future unified configuration shape, after SQL persistence and transport registration are centralized:
 
 ```csharp
 services.AddMiniBus(options =>
@@ -931,6 +958,7 @@ services.AddMiniBus(options =>
         TimeSpan.FromMinutes(1),
         TimeSpan.FromMinutes(5)
     ];
+    options.Recoverability.DeadLetterAfterRetriesExhausted = true;
 });
 ```
 
@@ -1021,7 +1049,7 @@ Large payload is stored in Blob Storage.
 
 ### 22.3 Handler testing API
 
-Example:
+Future `MiniBus.Testing` helper example:
 
 ```csharp
 var context = new TestableMiniBusContext();
@@ -1052,7 +1080,7 @@ Implement:
 - `MiniBusContext`
 - `IMessageSerializer`
 - `SystemTextJsonMessageSerializer`
-- `MiniBusOptions`
+- Foundational options needed by processors and transports
 - Routing registry
 - Handler registry
 - Basic handler invocation
@@ -1089,7 +1117,7 @@ Implement:
 - Adapter from `ServiceBusReceivedMessage`.
 - Adapter from `ServiceBusMessageActions`.
 - Manual trigger wrapper pattern.
-- Basic complete/dead-letter behavior.
+- Basic settlement behavior that later composes with recoverability.
 
 Out of scope:
 
@@ -1105,28 +1133,54 @@ Implement:
 - Retry headers.
 - Exception metadata.
 
-### Phase 5 — SQL persistence
-
-Implement:
-
-- SQL connection abstraction.
-- Inbox table.
-- Outbox table.
-- Transaction boundary.
-- Outbox dispatch.
-- Cleanup policy.
-
-### Phase 6 — Saga support
+### Phase 5 — Saga abstractions
 
 Implement:
 
 - Saga base type.
-- Saga data persistence.
+- Saga data contract.
 - Saga correlation mapping.
-- Optimistic concurrency.
-- Saga timeout scheduling.
+- Saga persistence abstraction.
+- Optimistic-concurrency-ready persistence metadata.
+- In-memory persistence for tests and samples.
 
-### Phase 7 — Azure Storage support
+Out of scope:
+
+- Production SQL saga persistence.
+- Saga timeout-specific APIs.
+- Service Bus sessions.
+
+### Phase 6 — Processing pipeline refactor
+
+Implement:
+
+- Pipeline context.
+- Transport receive behavior.
+- Deserialization and header behaviors.
+- Correlation behavior.
+- Recoverability behavior.
+- Saga behavior.
+- Handler invocation behavior.
+- Outgoing dispatch behavior.
+- Settlement behavior.
+
+This phase should land before production inbox/outbox and observability so those features can plug into explicit behavior boundaries instead of expanding `MiniBusProcessor`.
+
+### Phase 7 — SQL persistence and production reliability
+
+Implement:
+
+- SQL connection abstraction.
+- Transaction boundary shared by MiniBus persistence and business data where configured.
+- Inbox table.
+- Outbox table.
+- Outbox dispatch.
+- Deterministic outgoing message IDs for outbox replay.
+- SQL saga persistence.
+- Migration scripts or owned migration strategy.
+- Cleanup policy.
+
+### Phase 8 — Azure Storage support
 
 Implement:
 
@@ -1135,7 +1189,16 @@ Implement:
 - Optional Table Storage saga store.
 - Audit blob writer.
 
-### Phase 8 — Developer experience
+### Phase 9 — Observability
+
+Implement:
+
+- Structured logging integration.
+- OpenTelemetry-friendly activities.
+- Correlation-aware log scopes.
+- Metrics for processing, retries, dead-lettering, outbox dispatch, and saga handling.
+
+### Phase 10 — Developer experience
 
 Implement:
 
@@ -1147,7 +1210,90 @@ Implement:
 
 ---
 
-## 24. Non-goals
+## 24. Remaining feature backlog
+
+This list is the updateable checklist of work still needed for MiniBus to become a fully operational framework. Keep it current as OpenSpec changes are proposed, implemented, and archived.
+
+Next major framework feature: **SQL persistence: inbox/outbox**. The processing pipeline refactor may be useful enabling work, but SQL-backed inbox/outbox is the largest missing production reliability capability.
+
+### 24.1 Core and processing architecture
+
+- [ ] Decide whether to introduce a broader `MiniBusOptions` core configuration object beyond the current package-specific options.
+- [ ] Refactor `MiniBusProcessor` orchestration into explicit pipeline behaviors.
+- [ ] Add a pipeline context that can carry received message metadata, deserialized payloads, headers, recoverability state, saga state, outgoing operations, and settlement decisions.
+- [ ] Add unit tests for pipeline ordering and behavior isolation.
+
+### 24.2 SQL persistence and production reliability
+
+- [ ] Create `MiniBus.Persistence.Sql`.
+- [ ] Add a SQL connection/transaction abstraction.
+- [ ] Define how MiniBus persistence shares a transaction boundary with business data when configured.
+- [ ] Implement inbox table schema and duplicate-message detection.
+- [ ] Complete duplicate messages without re-running business handlers.
+- [ ] Implement outbox table schema.
+- [ ] Capture outgoing `Send`, `Publish`, and `Schedule` operations into the outbox.
+- [ ] Dispatch pending outbox operations after successful processing.
+- [ ] Add deterministic outgoing message IDs for replay-safe outbox dispatch.
+- [ ] Mark outbox operations as dispatched and support recovery after process crashes.
+- [ ] Add cleanup and expiry policy for inbox/outbox records.
+- [ ] Decide whether migrations are framework-owned or shipped as SQL scripts.
+- [ ] Add SQL integration tests for inbox, outbox capture, outbox replay, transaction behavior, and cleanup.
+
+### 24.3 Saga follow-ups
+
+Basic saga contracts, correlation, invocation, and in-memory persistence exist. The remaining saga work is production persistence and timeout behavior.
+
+- [ ] Implement SQL saga persistence.
+- [ ] Implement durable optimistic concurrency using SQL version metadata.
+- [ ] Ensure saga persistence failures and concurrency conflicts flow through recoverability.
+- [ ] Add saga timeout scheduling APIs or conventions.
+- [ ] Decide whether saga timeouts use Service Bus scheduled messages only or an optional SQL timeout table.
+- [ ] Implement optional SQL timeout table and dispatcher if durable SQL-managed timeouts are desired.
+- [ ] Add integration tests for SQL saga load/create/save/complete, concurrency conflicts, and timeout dispatch.
+
+### 24.4 Azure Storage support
+
+- [ ] Create `MiniBus.Persistence.AzureStorage` or equivalent storage package.
+- [ ] Implement Blob payload store.
+- [ ] Implement large payload/DataBus/claim-check support.
+- [ ] Add receive-side claim-check resolution before deserialization.
+- [ ] Implement optional Table Storage inbox.
+- [ ] Implement optional Table Storage saga store.
+- [ ] Implement audit blob writer.
+- [ ] Add Azurite-backed or live-resource-gated integration tests.
+
+### 24.5 Observability
+
+- [ ] Add structured logging integration.
+- [ ] Add correlation-aware log scopes.
+- [ ] Add OpenTelemetry-friendly activities/tracing.
+- [ ] Emit diagnostic metadata such as endpoint name, message type, message id, correlation id, causation id, handler type, retry attempt, delayed retry attempt, saga type, and saga correlation id.
+- [ ] Add processing outcome diagnostics for completed, retried, delayed, dead-lettered, skipped duplicate, saga-completed, and outbox-dispatched outcomes.
+- [ ] Add metrics for processing duration, handler duration, retry counts, dead-letter counts, outbox dispatch duration, and saga handling.
+- [ ] Add tests or verification hooks for log/tracing metadata.
+
+### 24.6 Developer experience
+
+- [ ] Add source generator for Azure Function wrappers.
+- [ ] Add Roslyn analyzers for common configuration and handler mistakes.
+- [ ] Add project templates.
+- [ ] Add a fuller billing sample.
+- [ ] Add an inventory or multi-endpoint sample.
+- [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
+- [ ] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
+
+### 24.7 Transport and advanced deferred items
+
+- [ ] Add Service Bus sessions support where ordering or saga-heavy workflows need it.
+- [ ] Add batch sending if throughput requirements justify it.
+- [ ] Add advanced retry and exception classification policies.
+- [ ] Add manual retry tooling or dashboard support.
+- [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
+- [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
+
+---
+
+## 25. Non-goals
 
 MiniBus should not initially support:
 
@@ -1167,9 +1313,9 @@ These can be revisited later only if there is a clear use case.
 
 ---
 
-## 25. Important design decisions
+## 26. Important design decisions
 
-### 25.1 Use SQL as the primary reliability store
+### 26.1 Use SQL as the primary reliability store
 
 SQL is the preferred persistence option for:
 
@@ -1180,31 +1326,31 @@ SQL is the preferred persistence option for:
 
 Azure Storage is useful but should not be the primary consistency mechanism when business data is also in SQL.
 
-### 25.2 Keep Azure Functions as adapter only
+### 26.2 Keep Azure Functions as adapter only
 
 The framework should not put business logic in function classes.
 
 Function classes should only call `MiniBusProcessor`.
 
-### 25.3 Prefer explicit routes
+### 26.3 Prefer explicit routes
 
 Do not rely too much on naming conventions.
 
 Explicit routing makes Copilot-generated code safer and makes production behavior more predictable.
 
-### 25.4 Outbox should be opt-in for MVP, but strongly recommended
+### 26.4 Outbox should be opt-in for MVP, but strongly recommended
 
 During early MVP, simple send/publish can work without outbox.
 
 For production business workflows, outbox should be enabled.
 
-### 25.5 Support manual wrappers before source generation
+### 26.5 Support manual wrappers before source generation
 
 Source generation improves developer experience, but manual trigger wrappers are easier to debug and should come first.
 
 ---
 
-## 26. Example end-to-end flow
+## 27. Example end-to-end flow
 
 Example command:
 
@@ -1241,6 +1387,8 @@ public sealed class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
 
         _dbContext.Invoices.Add(invoice);
 
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
         await context.Publish(
             new InvoiceCreated(message.InvoiceId, message.CustomerId),
             cancellationToken);
@@ -1265,13 +1413,11 @@ public sealed class BillingInputFunction
         [ServiceBusTrigger("billing-queue", Connection = "ServiceBus")]
         ServiceBusReceivedMessage message,
         ServiceBusMessageActions actions,
-        FunctionContext functionContext,
         CancellationToken cancellationToken)
     {
         return _processor.ProcessAsync(
             message,
             actions,
-            functionContext,
             cancellationToken);
     }
 }
@@ -1279,12 +1425,12 @@ public sealed class BillingInputFunction
 
 ---
 
-## 27. Open questions
+## 28. Open questions
 
 These should be decided before or during early implementation.
 
 1. Should MiniBus target only Azure Functions isolated worker, or also generic worker services?
-2. Should MiniBus target `net6.0` only, or multi-target newer .NET versions?
+2. Should MiniBus stay `net10.0`-first or multi-target older supported LTS frameworks?
 3. Should SQL persistence use raw ADO.NET, Dapper, or EF Core?
 4. Should business data and MiniBus persistence be required to use the same database connection?
 5. Should event topology default to one shared topic or one topic per event type?
@@ -1296,7 +1442,7 @@ These should be decided before or during early implementation.
 
 ---
 
-## 28. First OpenSpec change suggestion
+## 29. First OpenSpec change suggestion
 
 Suggested first OpenSpec change:
 
@@ -1335,7 +1481,7 @@ Suggested first implementation tasks:
 
 ---
 
-## 29. Copilot guidance
+## 30. Copilot guidance
 
 When using GitHub Copilot, prefer small implementation prompts.
 

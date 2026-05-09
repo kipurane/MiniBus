@@ -1,7 +1,7 @@
 # azure-functions-adapter Specification
 
 ## Purpose
-TBD - created by archiving change add-azure-functions-adapter. Update Purpose after archive.
+Defines Azure Functions isolated worker integration for processing Azure Service Bus trigger messages through MiniBus while keeping host and transport APIs out of business handlers.
 ## Requirements
 ### Requirement: Azure Functions adapter package isolates hosting concerns
 The Azure Functions adapter SHALL provide isolated worker Service Bus trigger integration while keeping Azure Functions and Azure Service Bus trigger types out of business handlers.
@@ -100,20 +100,24 @@ The Azure Functions adapter SHALL complete the received Service Bus message afte
 - **WHEN** the settlement overload deserializes a message, invokes matching handlers, and dispatches outgoing operations successfully
 - **THEN** it calls `CompleteMessageAsync` for the received Service Bus message
 
-### Requirement: Unrecoverable processing failure dead-letters the Service Bus message
-The Azure Functions adapter SHALL dead-letter the received Service Bus message when settlement actions are supplied and processing fails before successful completion.
+### Requirement: Settlement-enabled failures follow recoverability decisions
+The Azure Functions adapter SHALL settle failed processing according to the configured recoverability decision when settlement actions are supplied. It SHALL dead-letter the received Service Bus message only when recoverability chooses a dead-letter outcome, such as when no configured retries remain.
 
 #### Scenario: Deserialization failure dead-letters message
-- **WHEN** message deserialization fails during settlement-enabled processing
+- **WHEN** message deserialization fails during settlement-enabled processing and recoverability chooses a dead-letter outcome
 - **THEN** the processor calls `DeadLetterMessageAsync` for the received Service Bus message
 
 #### Scenario: Handler failure dead-letters message
-- **WHEN** a handler throws during settlement-enabled processing
+- **WHEN** a handler throws during settlement-enabled processing and recoverability chooses a dead-letter outcome
 - **THEN** the processor calls `DeadLetterMessageAsync` for the received Service Bus message
 
 #### Scenario: Outgoing dispatch failure dead-letters message
-- **WHEN** an outgoing operation fails during settlement-enabled processing
+- **WHEN** an outgoing operation fails during settlement-enabled processing and recoverability chooses a dead-letter outcome
 - **THEN** the processor calls `DeadLetterMessageAsync` for the received Service Bus message
+
+#### Scenario: Failure with retries remaining is not dead-lettered
+- **WHEN** settlement-enabled processing fails and recoverability chooses an immediate or delayed retry outcome
+- **THEN** the processor does not dead-letter the received Service Bus message for that failure
 
 ### Requirement: Azure Functions integration is registered through dependency injection
 The Azure Functions adapter SHALL provide a dependency injection extension for registering adapter services needed by manual Azure Function wrappers.
@@ -138,5 +142,4 @@ The Azure Functions adapter SHALL include unit tests for processor behavior with
 
 #### Scenario: Processor failure path is unit tested
 - **WHEN** unit tests process an invalid message or a message whose handler or outgoing dispatch fails
-- **THEN** they verify the message is dead-lettered and not completed
-
+- **THEN** they verify settlement follows the configured recoverability outcome and failed messages are not completed unless a delayed retry copy has been scheduled

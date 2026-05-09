@@ -1,7 +1,7 @@
 # minibus-core Specification
 
 ## Purpose
-TBD - created by archiving change add-core-message-processing. Update Purpose after archive.
+Defines MiniBus core contracts and transport-agnostic behavior for message intent, handler invocation, serialization, routing, and handler-facing context.
 ## Requirements
 ### Requirement: Message contracts define MiniBus message intent
 The core library SHALL define transport-agnostic message contracts for `IMessage`, `ICommand`, and `IEvent` so application code can express message intent without depending on Azure SDK or hosting types.
@@ -67,4 +67,3 @@ The core library SHALL resolve matching handlers for a message type from the app
 #### Scenario: No handlers are registered for a message type
 - **WHEN** a message instance is invoked and no matching handlers are registered
 - **THEN** the invocation flow completes without invoking any handlers
-
