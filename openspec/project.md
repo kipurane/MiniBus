@@ -1281,7 +1281,8 @@ Basic saga contracts, correlation, invocation, and in-memory persistence exist. 
 - [ ] Add source generator for Azure Function wrappers.
 - [ ] Add Roslyn analyzers for common configuration and handler mistakes.
 - [ ] Add project templates.
-- [ ] Add a fuller billing sample.
+- [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
+- [ ] Expand the billing sample into a fuller runnable reference app once the remaining core production features are stable.
 - [ ] Add an inventory or multi-endpoint sample.
 - [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [ ] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
