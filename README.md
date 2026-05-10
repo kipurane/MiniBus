@@ -51,6 +51,7 @@ Complete, retry, schedule retry, or dead-letter
 - `src/MiniBus.AzureServiceBus`: Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
 - `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
 - `src/MiniBus.Persistence.Sql`: SQL-shaped inbox/outbox persistence foundation using provider-neutral ADO.NET APIs.
+- `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit tests for core behavior, transport, Functions processing, and SQL persistence components.
 
 ## Current SQL Persistence Shape

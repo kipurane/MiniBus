@@ -1,10 +1,8 @@
 using MiniBus.Core.Context;
-using MiniBus.Core.Contracts;
 using MiniBus.Core.Sagas;
+using MiniBus.Samples.FunctionApp.Contracts;
 
 namespace MiniBus.Samples.FunctionApp.Sagas;
-
-public sealed record CreateInvoice(string InvoiceId) : ICommand;
 
 public sealed class BillingSagaData : ISagaData
 {
@@ -19,14 +17,14 @@ public sealed class BillingSagaData : ISagaData
 
 public sealed class BillingSaga :
     MiniBusSaga<BillingSagaData>,
-    IHandleSagaMessages<CreateInvoice>
+    IHandleSagaMessages<InvoiceCreated>
 {
     public override void ConfigureHowToFindSaga(SagaMapper<BillingSagaData> mapper)
     {
-        mapper.StartsWith<CreateInvoice>(message => message.InvoiceId);
+        mapper.StartsWith<InvoiceCreated>(message => message.InvoiceId);
     }
 
-    public Task Handle(CreateInvoice message, MiniBusContext context, CancellationToken cancellationToken)
+    public Task Handle(InvoiceCreated message, MiniBusContext context, CancellationToken cancellationToken)
     {
         Data.InvoiceCreated = true;
         MarkAsComplete();

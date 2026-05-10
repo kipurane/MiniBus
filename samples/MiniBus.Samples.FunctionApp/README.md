@@ -1,0 +1,29 @@
+# MiniBus.Samples.FunctionApp
+
+This sample is a minimal buildable Azure Functions-oriented project that shows the stable MiniBus setup path:
+
+- manual Service Bus trigger wrapper
+- `AddMiniBusAzureFunctions` registration
+- `SystemTextJsonMessageSerializer` registration
+- regular handler registration
+- basic saga registration that reacts to `InvoiceCreated`
+- Azure Service Bus route and dispatcher registration
+- recoverability settings
+
+## Build
+
+```bash
+dotnet build samples/MiniBus.Samples.FunctionApp/MiniBus.Samples.FunctionApp.csproj
+```
+
+The sample is intended to compile without provisioning Azure resources.
+
+## Configuration Notes
+
+`BillingInputFunction` expects a Service Bus trigger connection named `ServiceBus` and an input queue named `billing-queue` when run as a real Function App. `BillingEventsFunction` shows the matching event-processing wrapper for the `domain-events` route used by `InvoiceCreated`.
+
+`Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. The sample intentionally avoids owning the full Functions host executable until the project has a reusable host template.
+
+The registered `SampleServiceBusSender` is a placeholder that throws if outgoing dispatch is attempted. Replace it with `AzureServiceBusSender` backed by an Azure `ServiceBusClient` when connecting the sample to a real Service Bus namespace.
+
+SQL inbox/outbox persistence is intentionally not wired here yet. `MiniBus.Persistence.Sql` currently expects an application-provided `DbConnection` factory; first-class SQL Server/Azure SQL registration is tracked as follow-up work.

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MiniBus.Core\MiniBus.Core.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.AzureFunctions\MiniBus.AzureFunctions.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.AzureServiceBus\MiniBus.AzureServiceBus.csproj" />
+  </ItemGroup>
+
+</Project>
