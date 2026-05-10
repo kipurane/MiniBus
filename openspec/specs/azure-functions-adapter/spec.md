@@ -133,6 +133,17 @@ The Azure Functions adapter SHALL include a minimal sample Azure Function wrappe
 - **WHEN** a developer reads the sample wrapper
 - **THEN** it shows a thin Azure Function class receiving Service Bus trigger arguments and calling `MiniBusProcessor.ProcessAsync`
 
+### Requirement: Azure Functions sample shows complete adapter registration
+The Azure Functions adapter documentation and samples SHALL include a buildable isolated worker sample showing complete adapter registration.
+
+#### Scenario: Sample registers adapter services
+- **WHEN** a developer reads the buildable Function App sample
+- **THEN** it shows `AddMiniBusAzureFunctions` registration with endpoint and recoverability options
+
+#### Scenario: Sample keeps trigger wrapper thin
+- **WHEN** a developer reads the sample Service Bus trigger function
+- **THEN** the function delegates directly to `MiniBusProcessor.ProcessAsync`
+
 ### Requirement: Adapter behavior is covered by unit tests without live Azure resources
 The Azure Functions adapter SHALL include unit tests for processor behavior without requiring a live Azure Functions host or Azure Service Bus namespace.
 
