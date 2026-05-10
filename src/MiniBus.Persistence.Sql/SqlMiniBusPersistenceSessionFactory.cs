@@ -22,7 +22,7 @@ public sealed class SqlMiniBusPersistenceSessionFactory : IMiniBusPersistenceSes
     {
         if (_options.ConnectionFactory is null)
         {
-            throw new InvalidOperationException("MiniBus SQL persistence requires a DbConnection factory.");
+            throw new InvalidOperationException("MiniBus SQL persistence requires a SQL Server connection string or DbConnection factory.");
         }
 
         var connection = _options.ConnectionFactory();

@@ -50,15 +50,26 @@ Complete, retry, schedule retry, or dead-letter
 - `src/MiniBus.Core`: message contracts, handler APIs, context, serialization, routing, recoverability, saga abstractions, and persistence abstractions.
 - `src/MiniBus.AzureServiceBus`: Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
 - `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
-- `src/MiniBus.Persistence.Sql`: SQL-shaped inbox/outbox persistence foundation using provider-neutral ADO.NET APIs.
+- `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit tests for core behavior, transport, Functions processing, and SQL persistence components.
 
-## Current SQL Persistence Shape
+## SQL Persistence
 
-`MiniBus.Persistence.Sql` currently provides the inbox/outbox contracts, schema script, persistence session, outbox store, and dispatcher. It intentionally does not take a direct `Microsoft.Data.SqlClient` dependency yet.
+`MiniBus.Persistence.Sql` provides the inbox/outbox contracts, schema script, persistence session, outbox store, and dispatcher. The common SQL Server/Azure SQL setup path uses a connection string:
 
-Applications provide the concrete SQL Server or Azure SQL connection factory:
+```csharp
+services.AddMiniBusSqlPersistence(
+    connectionString,
+    options =>
+    {
+        options.DispatcherBatchSize = 100;
+    });
+```
+
+Run `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` against the target database before enabling the package. The script creates `MiniBus.Inbox` for processed-message ids and `MiniBus.Outbox` for pending outgoing send, publish, and schedule operations.
+
+Applications that need custom connection ownership can still provide a concrete SQL connection factory:
 
 ```csharp
 services.AddMiniBusSqlPersistence(options =>
@@ -68,7 +79,7 @@ services.AddMiniBusSqlPersistence(options =>
 });
 ```
 
-First-class SQL Server/Azure SQL packaging with `Microsoft.Data.SqlClient`, connection-string registration, and SQL Server-backed integration tests is planned as follow-up work.
+SQL Server-backed integration tests are opt-in. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the SQL persistence tests to verify the packaged schema and persistence behavior against SQL Server/Azure SQL.
 
 ## Development Workflow
 

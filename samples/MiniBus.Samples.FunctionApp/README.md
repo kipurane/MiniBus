@@ -26,4 +26,15 @@ The sample is intended to compile without provisioning Azure resources.
 
 The registered `SampleServiceBusSender` is a placeholder that throws if outgoing dispatch is attempted. Replace it with `AzureServiceBusSender` backed by an Azure `ServiceBusClient` when connecting the sample to a real Service Bus namespace.
 
-SQL inbox/outbox persistence is intentionally not wired here yet. `MiniBus.Persistence.Sql` currently expects an application-provided `DbConnection` factory; first-class SQL Server/Azure SQL registration is tracked as follow-up work.
+SQL inbox/outbox persistence is intentionally not wired into the sample's default build. A real Function App can add it next to the existing MiniBus registration:
+
+```csharp
+services.AddMiniBusSqlPersistence(
+    sqlConnectionString,
+    options =>
+    {
+        options.DispatcherBatchSize = 100;
+    });
+```
+
+Apply `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` to the target SQL Server/Azure SQL database before enabling SQL persistence. Applications that need custom connection ownership can use the existing `DbConnection` factory option instead.

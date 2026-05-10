@@ -1,13 +1,83 @@
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Serialization;
+using MiniBus.Persistence.Sql.DependencyInjection;
 using Xunit;
 
 namespace MiniBus.Persistence.Sql.Tests;
 
 public sealed class SqlPersistenceTests
 {
+    [Fact]
+    public void AddMiniBusSqlPersistence_WithConnectionString_ConfiguresSqlConnectionFactory()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false",
+                options =>
+                {
+                    options.SchemaName = "CustomSchema";
+                    options.InboxTableName = "CustomInbox";
+                    options.OutboxTableName = "CustomOutbox";
+                    options.DispatcherBatchSize = 17;
+                })
+            .BuildServiceProvider();
+
+        var options = serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>();
+
+        Assert.Equal("CustomSchema", options.SchemaName);
+        Assert.Equal("CustomInbox", options.InboxTableName);
+        Assert.Equal("CustomOutbox", options.OutboxTableName);
+        Assert.Equal(17, options.DispatcherBatchSize);
+        Assert.NotNull(options.ConnectionFactory);
+
+        using var connection = Assert.IsType<SqlConnection>(options.ConnectionFactory());
+        Assert.Contains("MiniBusTests", connection.ConnectionString, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_UsesExplicitConnectionFactoryWhenConnectionStringIsAlsoConfigured()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusSqlPersistence(
+                "Server=from-connection-string;Database=MiniBusTests;Encrypt=false",
+                options =>
+                {
+                    options.ConnectionFactory = () => new SqlConnection(
+                        "Server=from-factory;Database=MiniBusTests;Encrypt=false");
+                })
+            .BuildServiceProvider();
+
+        var options = serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>();
+
+        Assert.NotNull(options.ConnectionFactory);
+        using var connection = Assert.IsType<SqlConnection>(options.ConnectionFactory());
+        Assert.Contains("from-factory", connection.ConnectionString, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_WithOptionsConnectionString_ConfiguresSqlConnectionFactory()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusSqlPersistence(options =>
+            {
+                options.ConnectionString = "Server=from-options;Database=MiniBusTests;Encrypt=false";
+            })
+            .BuildServiceProvider();
+
+        var options = serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>();
+
+        Assert.NotNull(options.ConnectionFactory);
+        using var connection = Assert.IsType<SqlConnection>(options.ConnectionFactory());
+        Assert.Contains("from-options", connection.ConnectionString, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void OutboxOperationSerializer_PreservesMessageBodyMetadataHeadersAndDueTime()
     {

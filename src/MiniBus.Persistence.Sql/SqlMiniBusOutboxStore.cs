@@ -24,7 +24,7 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
     {
         if (_options.ConnectionFactory is null)
         {
-            throw new InvalidOperationException("MiniBus SQL outbox dispatch requires a DbConnection factory.");
+            throw new InvalidOperationException("MiniBus SQL outbox dispatch requires a SQL Server connection string or DbConnection factory.");
         }
 
         await using var connection = _options.ConnectionFactory();
@@ -106,7 +106,7 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
     {
         if (_options.ConnectionFactory is null)
         {
-            throw new InvalidOperationException("MiniBus SQL outbox dispatch requires a DbConnection factory.");
+            throw new InvalidOperationException("MiniBus SQL outbox dispatch requires a SQL Server connection string or DbConnection factory.");
         }
 
         await using var connection = _options.ConnectionFactory();
