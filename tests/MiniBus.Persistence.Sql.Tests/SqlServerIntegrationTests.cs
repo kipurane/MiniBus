@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using System.Data.Common;
 using System.Net.Sockets;
 using System.Text.Json;
 using DotNet.Testcontainers.Builders;
@@ -64,7 +65,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT OperationKind, MessageType, HeadersJson
+            SELECT OperationKind, MessageType, HeadersJson, OutgoingMessageId
             FROM {database.OutboxTableName};
             """;
 
@@ -73,7 +74,71 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Equal(MiniBusOutboxOperationKind.Send.ToString(), reader.GetString(0));
         Assert.Contains(nameof(TestCommand), reader.GetString(1), StringComparison.Ordinal);
         Assert.Contains("correlation-1", reader.GetString(2), StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(reader.GetString(3)));
         Assert.False(await reader.ReadAsync());
+    }
+
+    [SqlServerFact]
+    public async Task Commit_CanUseApplicationOwnedTransaction()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await database.CreateBusinessTableAsync();
+        await using var connection = database.CreateConnection();
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var factory = database.CreateSessionFactory();
+        await using var session = factory.CreateForTransaction(connection, transaction);
+
+        await database.InsertBusinessRecordAsync(connection, transaction, id: 1);
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-shared-transaction"),
+            new[] { CreateOutboxOperation() });
+
+        await transaction.CommitAsync();
+
+        Assert.Equal(1, await database.CountRowsAsync(database.BusinessTableName));
+        Assert.Equal(1, await database.CountRowsAsync(database.InboxTableName));
+        Assert.Equal(1, await database.CountRowsAsync(database.OutboxTableName));
+    }
+
+    [SqlServerFact]
+    public async Task Commit_DoesNotCompleteApplicationOwnedTransaction()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await database.CreateBusinessTableAsync();
+        await using var connection = database.CreateConnection();
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var factory = database.CreateSessionFactory();
+        await using var session = factory.CreateForTransaction(connection, transaction);
+
+        await database.InsertBusinessRecordAsync(connection, transaction, id: 1);
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-shared-rollback"),
+            new[] { CreateOutboxOperation() });
+
+        await transaction.RollbackAsync();
+
+        Assert.Equal(0, await database.CountRowsAsync(database.BusinessTableName));
+        Assert.Equal(0, await database.CountRowsAsync(database.InboxTableName));
+        Assert.Equal(0, await database.CountRowsAsync(database.OutboxTableName));
+    }
+
+    [SqlServerFact]
+    public async Task CreateForTransaction_RejectsInvalidTransactionOwnership()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await using var connection = database.CreateConnection();
+        await connection.OpenAsync();
+        await using var otherConnection = database.CreateConnection();
+        await otherConnection.OpenAsync();
+        await using var otherTransaction = await otherConnection.BeginTransactionAsync();
+        var factory = database.CreateSessionFactory();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => factory.CreateForTransaction(connection, otherTransaction));
+
+        Assert.Contains("provided DbConnection", exception.Message, StringComparison.Ordinal);
     }
 
     [SqlServerFact]
@@ -91,6 +156,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         var operation = Assert.Single(operations);
 
         Assert.Equal(1, operation.AttemptCount);
+        Assert.False(string.IsNullOrWhiteSpace(operation.OutgoingMessageId));
 
         await store.MarkDispatchedAsync(operation.Id);
         var dispatchedUtc = await database.QueryScalarAsync<DateTimeOffset?>(
@@ -98,6 +164,79 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             operation.Id);
 
         Assert.NotNull(dispatchedUtc);
+    }
+
+    [SqlServerFact]
+    public async Task OutboxStore_ReusesDeterministicOutgoingMessageIdAcrossReplay()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await using var session = await database.CreateSessionAsync();
+
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-for-replay"),
+            new[] { CreateOutboxOperation() });
+
+        var store = database.CreateOutboxStore();
+        var firstClaim = Assert.Single(await store.ClaimPendingAsync(batchSize: 10));
+
+        await store.MarkFailedAsync(firstClaim.Id, new InvalidOperationException("transport failed"));
+
+        var secondClaim = Assert.Single(await store.ClaimPendingAsync(batchSize: 10));
+
+        Assert.Equal(firstClaim.Id, secondClaim.Id);
+        Assert.Equal(firstClaim.OutgoingMessageId, secondClaim.OutgoingMessageId);
+        Assert.Equal(2, secondClaim.AttemptCount);
+    }
+
+    [SqlServerFact]
+    public async Task Commit_GeneratesDistinctDeterministicOutgoingMessageIds()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await using var session = await database.CreateSessionAsync();
+
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-multiple-outbox"),
+            new[]
+            {
+                CreateOutboxOperation(),
+                CreateOutboxOperation()
+            });
+
+        var outgoingMessageIds = await database.QueryStringsAsync(
+            $"SELECT OutgoingMessageId FROM {database.OutboxTableName} ORDER BY CreatedUtc, Id;");
+
+        Assert.Equal(2, outgoingMessageIds.Count);
+        Assert.NotEqual(outgoingMessageIds[0], outgoingMessageIds[1]);
+    }
+
+    [SqlServerFact]
+    public async Task OutboxStore_ReclaimsOperationAfterClaimLeaseExpires()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync(options =>
+        {
+            options.OutboxClaimLeaseDuration = TimeSpan.FromSeconds(30);
+        });
+        await using var session = await database.CreateSessionAsync();
+
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-claim-lease"),
+            new[] { CreateOutboxOperation() });
+
+        var store = database.CreateOutboxStore();
+        var firstClaim = Assert.Single(await store.ClaimPendingAsync(batchSize: 10));
+
+        Assert.Empty(await store.ClaimPendingAsync(batchSize: 10));
+
+        await database.ExecuteNonQueryAsync(
+            $"""
+            UPDATE {database.OutboxTableName}
+            SET ClaimedUtc = DATEADD(second, -31, SYSUTCDATETIME())
+            WHERE Id = @Id;
+            """,
+            new SqlParameter("@Id", firstClaim.Id));
+
+        var reclaimed = Assert.Single(await store.ClaimPendingAsync(batchSize: 10));
+        Assert.Equal(firstClaim.Id, reclaimed.Id);
     }
 
     [SqlServerFact]
@@ -147,6 +286,49 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         await using var verificationSession = await database.CreateSessionAsync();
         Assert.False(await verificationSession.IsProcessedAsync(inboxMessage));
+    }
+
+    [SqlServerFact]
+    public async Task Cleanup_RemovesOnlyExpiredEligibleRowsWithinBatchLimit()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync(options =>
+        {
+            options.InboxRetention = TimeSpan.FromDays(7);
+            options.DispatchedOutboxRetention = TimeSpan.FromDays(3);
+            options.FailedOutboxRetention = null;
+            options.CleanupBatchSize = 1;
+        });
+        await using var oldSession = await database.CreateSessionAsync();
+        await oldSession.CommitAsync(
+            database.CreateInboxMessage("old-message"),
+            new[] { CreateOutboxOperation() });
+        await using var freshSession = await database.CreateSessionAsync();
+        await freshSession.CommitAsync(
+            database.CreateInboxMessage("fresh-message"),
+            new[] { CreateOutboxOperation() });
+
+        await database.ExecuteNonQueryAsync($"""
+            UPDATE {database.InboxTableName}
+            SET ProcessedUtc = DATEADD(day, -10, SYSUTCDATETIME())
+            WHERE MessageId = @MessageId;
+            """, new SqlParameter("@MessageId", "old-message"));
+        await database.ExecuteNonQueryAsync($"""
+            UPDATE {database.OutboxTableName}
+            SET DispatchedUtc = DATEADD(day, -4, SYSUTCDATETIME())
+            WHERE IncomingMessageId = @MessageId;
+            """, new SqlParameter("@MessageId", "old-message"));
+        await database.ExecuteNonQueryAsync($"""
+            UPDATE {database.OutboxTableName}
+            SET LastError = N'failed', CreatedUtc = DATEADD(day, -30, SYSUTCDATETIME())
+            WHERE IncomingMessageId = @MessageId;
+            """, new SqlParameter("@MessageId", "fresh-message"));
+
+        var store = database.CreateOutboxStore();
+        var deleted = await store.CleanupAsync();
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(1, await database.CountRowsAsync(database.InboxTableName));
+        Assert.Equal(1, await database.CountRowsAsync(database.OutboxTableName));
     }
 
     private static MiniBusOutboxOperation CreateOutboxOperation()
@@ -209,7 +391,8 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             }
         }
 
-        internal async Task<SqlServerTestDatabase> CreateDatabaseAsync()
+        internal async Task<SqlServerTestDatabase> CreateDatabaseAsync(
+            Action<MiniBusSqlPersistenceOptions>? configureOptions = null)
         {
             if (_startupException is not null)
             {
@@ -232,7 +415,8 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
             var database = new SqlServerTestDatabase(
                 connectionString,
-                $"MiniBusTest_{Guid.NewGuid():N}");
+                $"MiniBusTest_{Guid.NewGuid():N}",
+                configureOptions);
             await database.ApplySchemaAsync();
             return database;
         }
@@ -243,17 +427,22 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         private readonly MiniBusSqlPersistenceOptions _options;
         private readonly SqlOutboxOperationSerializer _operationSerializer;
 
-        internal SqlServerTestDatabase(string connectionString, string schemaName)
+        internal SqlServerTestDatabase(
+            string connectionString,
+            string schemaName,
+            Action<MiniBusSqlPersistenceOptions>? configureOptions)
         {
             ConnectionString = connectionString;
             SchemaName = schemaName;
             InboxTableName = $"[{SchemaName}].[Inbox]";
             OutboxTableName = $"[{SchemaName}].[Outbox]";
+            BusinessTableName = $"[{SchemaName}].[BusinessData]";
             _options = new MiniBusSqlPersistenceOptions
             {
                 SchemaName = SchemaName,
                 ConnectionFactory = CreateConnection
             };
+            configureOptions?.Invoke(_options);
             _operationSerializer = new SqlOutboxOperationSerializer(new JsonMessageSerializer());
         }
 
@@ -265,6 +454,8 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         public string OutboxTableName { get; }
 
+        public string BusinessTableName { get; }
+
         public SqlConnection CreateConnection()
         {
             return new SqlConnection(ConnectionString);
@@ -272,8 +463,12 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         public async ValueTask<IMiniBusPersistenceSession> CreateSessionAsync()
         {
-            var factory = new SqlMiniBusPersistenceSessionFactory(_options, _operationSerializer);
-            return await factory.CreateAsync();
+            return await CreateSessionFactory().CreateAsync();
+        }
+
+        public SqlMiniBusPersistenceSessionFactory CreateSessionFactory()
+        {
+            return new SqlMiniBusPersistenceSessionFactory(_options, _operationSerializer);
         }
 
         public ISqlMiniBusOutboxStore CreateOutboxStore()
@@ -322,6 +517,57 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             return (T)value;
         }
 
+        public async Task<IReadOnlyList<string>> QueryStringsAsync(string commandText)
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = commandText;
+
+            var values = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                values.Add(reader.GetString(0));
+            }
+
+            return values;
+        }
+
+        public async Task<int> CountRowsAsync(string tableName)
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
+        }
+
+        public async Task CreateBusinessTableAsync()
+        {
+            await ExecuteNonQueryAsync($"""
+                CREATE TABLE {BusinessTableName}
+                (
+                    Id int NOT NULL CONSTRAINT PK_{SchemaName}_BusinessData PRIMARY KEY
+                );
+                """);
+        }
+
+        public async Task InsertBusinessRecordAsync(
+            DbConnection connection,
+            DbTransaction transaction,
+            int id)
+        {
+            await using DbCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"INSERT INTO {BusinessTableName} (Id) VALUES (@Id);";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@Id";
+            parameter.Value = id;
+            command.Parameters.Add(parameter);
+            await command.ExecuteNonQueryAsync();
+        }
+
         public async Task DropOutboxTableAsync()
         {
             await ExecuteNonQueryAsync($"DROP TABLE {OutboxTableName};");
@@ -330,6 +576,9 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         public async ValueTask DisposeAsync()
         {
             await ExecuteNonQueryAsync($"""
+                IF OBJECT_ID(N'{SchemaName}.BusinessData', N'U') IS NOT NULL
+                    DROP TABLE {BusinessTableName};
+
                 IF OBJECT_ID(N'{SchemaName}.Outbox', N'U') IS NOT NULL
                     DROP TABLE {OutboxTableName};
 
@@ -343,24 +592,52 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         public async Task ApplySchemaAsync()
         {
-            var script = File.ReadAllText(Path.GetFullPath(
-                "../../../../../src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql",
-                AppContext.BaseDirectory));
-            script = script
-                .Replace("SCHEMA_ID(N'MiniBus')", $"SCHEMA_ID(N'{SchemaName}')", StringComparison.Ordinal)
-                .Replace("CREATE SCHEMA MiniBus", $"CREATE SCHEMA [{SchemaName}]", StringComparison.Ordinal)
-                .Replace("N'MiniBus'", $"N'{SchemaName}'", StringComparison.Ordinal)
-                .Replace("MiniBus.", $"{SchemaName}.", StringComparison.Ordinal);
+            var schemaDirectory = Path.GetFullPath(
+                "../../../../../src/MiniBus.Persistence.Sql/Schema",
+                AppContext.BaseDirectory);
+            var scriptPaths = Directory.GetFiles(schemaDirectory, "*.sql");
+            var invalidScript = scriptPaths
+                .Select(Path.GetFileName)
+                .FirstOrDefault(name => !IsVersionedSchemaScriptName(name));
 
-            await ExecuteNonQueryAsync(script);
+            if (invalidScript is not null)
+            {
+                throw new InvalidOperationException(
+                    $"MiniBus SQL schema scripts must use a three-digit migration prefix such as '001-'. Invalid script: {invalidScript}");
+            }
+
+            foreach (var scriptPath in scriptPaths.Order(StringComparer.Ordinal))
+            {
+                var script = File.ReadAllText(scriptPath);
+                script = script
+                    .Replace("SCHEMA_ID(N'MiniBus')", $"SCHEMA_ID(N'{SchemaName}')", StringComparison.Ordinal)
+                    .Replace("CREATE SCHEMA MiniBus", $"CREATE SCHEMA [{SchemaName}]", StringComparison.Ordinal)
+                    .Replace("OBJECT_ID(N'MiniBus.Outbox'", $"OBJECT_ID(N'{SchemaName}.Outbox'", StringComparison.Ordinal)
+                    .Replace("OBJECT_ID(N'MiniBus.Inbox'", $"OBJECT_ID(N'{SchemaName}.Inbox'", StringComparison.Ordinal)
+                    .Replace("N'MiniBus.Outbox'", $"N'{SchemaName}.Outbox'", StringComparison.Ordinal)
+                    .Replace("N'MiniBus'", $"N'{SchemaName}'", StringComparison.Ordinal)
+                    .Replace("MiniBus.", $"{SchemaName}.", StringComparison.Ordinal);
+
+                await ExecuteNonQueryAsync(script);
+            }
         }
 
-        private async Task ExecuteNonQueryAsync(string commandText)
+        private static bool IsVersionedSchemaScriptName(string? fileName)
+        {
+            return fileName is { Length: > 4 }
+                   && char.IsDigit(fileName[0])
+                   && char.IsDigit(fileName[1])
+                   && char.IsDigit(fileName[2])
+                   && fileName[3] == '-';
+        }
+
+        public async Task ExecuteNonQueryAsync(string commandText, params SqlParameter[] parameters)
         {
             await using var connection = CreateConnection();
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = commandText;
+            command.Parameters.AddRange(parameters);
             await command.ExecuteNonQueryAsync();
         }
     }

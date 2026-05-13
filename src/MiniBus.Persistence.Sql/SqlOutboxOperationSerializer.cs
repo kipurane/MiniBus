@@ -29,6 +29,7 @@ public sealed class SqlOutboxOperationSerializer
 
     public MiniBusOutboxStoredOperation Deserialize(
         Guid id,
+        string outgoingMessageId,
         string operationKind,
         string messageTypeName,
         byte[] body,
@@ -41,6 +42,7 @@ public sealed class SqlOutboxOperationSerializer
 
         return new MiniBusOutboxStoredOperation(
             id,
+            outgoingMessageId,
             Enum.Parse<MiniBusOutboxOperationKind>(operationKind, ignoreCase: false),
             new BinaryData(body),
             messageType,

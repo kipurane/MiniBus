@@ -16,4 +16,7 @@ public interface ISqlMiniBusOutboxStore
         Guid operationId,
         Exception exception,
         CancellationToken cancellationToken = default);
+
+    Task<int> CleanupAsync(
+        CancellationToken cancellationToken = default);
 }

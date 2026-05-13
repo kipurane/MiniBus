@@ -21,6 +21,7 @@ BEGIN
     CREATE TABLE MiniBus.Outbox
     (
         Id uniqueidentifier NOT NULL,
+        OutgoingMessageId nvarchar(200) NOT NULL,
         EndpointName nvarchar(200) NOT NULL,
         IncomingMessageId nvarchar(200) NOT NULL,
         OperationKind nvarchar(32) NOT NULL,
@@ -42,4 +43,7 @@ BEGIN
 
     CREATE INDEX IX_MiniBus_Outbox_IncomingMessage
         ON MiniBus.Outbox (EndpointName, IncomingMessageId);
+
+    CREATE UNIQUE INDEX UX_MiniBus_Outbox_OutgoingMessageId
+        ON MiniBus.Outbox (OutgoingMessageId);
 END;

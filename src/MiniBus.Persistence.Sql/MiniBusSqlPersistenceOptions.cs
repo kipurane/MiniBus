@@ -15,4 +15,14 @@ public sealed class MiniBusSqlPersistenceOptions
     public string OutboxTableName { get; set; } = "Outbox";
 
     public int DispatcherBatchSize { get; set; } = 100;
+
+    public TimeSpan OutboxClaimLeaseDuration { get; set; } = TimeSpan.FromMinutes(5);
+
+    public TimeSpan? InboxRetention { get; set; }
+
+    public TimeSpan? DispatchedOutboxRetention { get; set; }
+
+    public TimeSpan? FailedOutboxRetention { get; set; }
+
+    public int CleanupBatchSize { get; set; } = 1000;
 }

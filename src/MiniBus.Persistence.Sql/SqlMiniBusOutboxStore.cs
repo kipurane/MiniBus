@@ -8,6 +8,7 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
     private readonly MiniBusSqlPersistenceOptions _options;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
     private readonly SqlTableNames _tableNames;
+    private readonly int _claimLeaseSeconds;
 
     public SqlMiniBusOutboxStore(
         MiniBusSqlPersistenceOptions options,
@@ -16,6 +17,7 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
         _options = options;
         _operationSerializer = operationSerializer;
         _tableNames = new SqlTableNames(options);
+        _claimLeaseSeconds = GetClaimLeaseSeconds(options);
     }
 
     public async Task<IReadOnlyList<MiniBusOutboxStoredOperation>> ClaimPendingAsync(
@@ -37,6 +39,7 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
                     LastError = NULL
             OUTPUT
                 inserted.Id,
+                inserted.OutgoingMessageId,
                 inserted.OperationKind,
                 inserted.MessageType,
                 inserted.Body,
@@ -47,11 +50,12 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
                 SELECT TOP (@BatchSize) *
                 FROM {_tableNames.Outbox} WITH (UPDLOCK, READPAST, ROWLOCK)
                 WHERE DispatchedUtc IS NULL
-                  AND (ClaimedUtc IS NULL OR ClaimedUtc < DATEADD(minute, -5, SYSUTCDATETIME()))
+                  AND (ClaimedUtc IS NULL OR ClaimedUtc < DATEADD(second, -@ClaimLeaseSeconds, SYSUTCDATETIME()))
                 ORDER BY CreatedUtc, Id
             ) AS pending;
             """;
         AddParameter(command, "@BatchSize", batchSize);
+        AddParameter(command, "@ClaimLeaseSeconds", _claimLeaseSeconds);
 
         var operations = new List<MiniBusOutboxStoredOperation>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -62,13 +66,64 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
                 reader.GetGuid(0),
                 reader.GetString(1),
                 reader.GetString(2),
-                (byte[])reader.GetValue(3),
-                reader.GetString(4),
-                reader.IsDBNull(5) ? null : (DateTimeOffset)reader.GetValue(5),
-                reader.GetInt32(6)));
+                reader.GetString(3),
+                (byte[])reader.GetValue(4),
+                reader.GetString(5),
+                reader.IsDBNull(6) ? null : (DateTimeOffset)reader.GetValue(6),
+                reader.GetInt32(7)));
         }
 
         return operations;
+    }
+
+    public async Task<int> CleanupAsync(CancellationToken cancellationToken = default)
+    {
+        var deleted = 0;
+
+        if (_options.InboxRetention is not null)
+        {
+            deleted += await ExecuteCleanupAsync(
+                    $"""
+                    DELETE TOP (@BatchSize)
+                    FROM {_tableNames.Inbox}
+                    WHERE ProcessedUtc < @CutoffUtc;
+                    """,
+                    DateTimeOffset.UtcNow.Subtract(_options.InboxRetention.Value),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (_options.DispatchedOutboxRetention is not null)
+        {
+            deleted += await ExecuteCleanupAsync(
+                    $"""
+                    DELETE TOP (@BatchSize)
+                    FROM {_tableNames.Outbox}
+                    WHERE DispatchedUtc IS NOT NULL
+                      AND DispatchedUtc < @CutoffUtc;
+                    """,
+                    DateTimeOffset.UtcNow.Subtract(_options.DispatchedOutboxRetention.Value),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (_options.FailedOutboxRetention is not null)
+        {
+            deleted += await ExecuteCleanupAsync(
+                    $"""
+                    DELETE TOP (@BatchSize)
+                    FROM {_tableNames.Outbox}
+                    WHERE DispatchedUtc IS NULL
+                      AND ClaimedUtc IS NULL
+                      AND LastError IS NOT NULL
+                      AND CreatedUtc < @CutoffUtc;
+                    """,
+                    DateTimeOffset.UtcNow.Subtract(_options.FailedOutboxRetention.Value),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return deleted;
     }
 
     public async Task MarkDispatchedAsync(
@@ -125,6 +180,36 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
         }
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> ExecuteCleanupAsync(
+        string commandText,
+        DateTimeOffset cutoffUtc,
+        CancellationToken cancellationToken)
+    {
+        if (_options.ConnectionFactory is null)
+        {
+            throw new InvalidOperationException("MiniBus SQL cleanup requires a SQL Server connection string or DbConnection factory.");
+        }
+
+        await using var connection = _options.ConnectionFactory();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        AddParameter(command, "@BatchSize", _options.CleanupBatchSize);
+        AddParameter(command, "@CutoffUtc", cutoffUtc);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static int GetClaimLeaseSeconds(MiniBusSqlPersistenceOptions options)
+    {
+        if (options.OutboxClaimLeaseDuration <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("MiniBus SQL outbox claim lease duration must be greater than zero.");
+        }
+
+        return (int)Math.Ceiling(options.OutboxClaimLeaseDuration.TotalSeconds);
     }
 
     private static void AddParameter(DbCommand command, string name, object value)

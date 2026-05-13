@@ -24,6 +24,11 @@ public sealed class SqlPersistenceTests
                     options.InboxTableName = "CustomInbox";
                     options.OutboxTableName = "CustomOutbox";
                     options.DispatcherBatchSize = 17;
+                    options.OutboxClaimLeaseDuration = TimeSpan.FromMinutes(3);
+                    options.InboxRetention = TimeSpan.FromDays(30);
+                    options.DispatchedOutboxRetention = TimeSpan.FromDays(7);
+                    options.FailedOutboxRetention = TimeSpan.FromDays(14);
+                    options.CleanupBatchSize = 25;
                 })
             .BuildServiceProvider();
 
@@ -33,6 +38,11 @@ public sealed class SqlPersistenceTests
         Assert.Equal("CustomInbox", options.InboxTableName);
         Assert.Equal("CustomOutbox", options.OutboxTableName);
         Assert.Equal(17, options.DispatcherBatchSize);
+        Assert.Equal(TimeSpan.FromMinutes(3), options.OutboxClaimLeaseDuration);
+        Assert.Equal(TimeSpan.FromDays(30), options.InboxRetention);
+        Assert.Equal(TimeSpan.FromDays(7), options.DispatchedOutboxRetention);
+        Assert.Equal(TimeSpan.FromDays(14), options.FailedOutboxRetention);
+        Assert.Equal(25, options.CleanupBatchSize);
         Assert.NotNull(options.ConnectionFactory);
 
         using var connection = Assert.IsType<SqlConnection>(options.ConnectionFactory());
@@ -97,6 +107,7 @@ public sealed class SqlPersistenceTests
         var serialized = serializer.Serialize(operation);
         var stored = serializer.Deserialize(
             Guid.NewGuid(),
+            "outgoing-message-1",
             serialized.OperationKind,
             serialized.MessageType,
             serialized.Body,
@@ -105,6 +116,7 @@ public sealed class SqlPersistenceTests
             attemptCount: 3);
 
         Assert.Equal(MiniBusOutboxOperationKind.Schedule, stored.Kind);
+        Assert.Equal("outgoing-message-1", stored.OutgoingMessageId);
         Assert.Equal(typeof(TestCommand), stored.MessageType);
         Assert.Equal("serialized:TestCommand", stored.Body.ToString());
         Assert.Equal("correlation-1", stored.Headers[MiniBusHeaderNames.CorrelationId]);
@@ -169,15 +181,29 @@ public sealed class SqlPersistenceTests
         Assert.Contains("MessageId", script, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE MiniBus.Outbox", script, StringComparison.Ordinal);
         Assert.Contains("OperationKind", script, StringComparison.Ordinal);
+        Assert.Contains("OutgoingMessageId", script, StringComparison.Ordinal);
         Assert.Contains("HeadersJson", script, StringComparison.Ordinal);
         Assert.Contains("AttemptCount", script, StringComparison.Ordinal);
         Assert.Contains("DispatchedUtc", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdditiveSchemaScript_AddsOutgoingMessageIdForExistingOutboxTables()
+    {
+        var script = File.ReadAllText(Path.GetFullPath(
+            "../../../../../src/MiniBus.Persistence.Sql/Schema/002-outbox-outgoing-message-id.sql",
+            AppContext.BaseDirectory));
+
+        Assert.Contains("COL_LENGTH", script, StringComparison.Ordinal);
+        Assert.Contains("OutgoingMessageId", script, StringComparison.Ordinal);
+        Assert.Contains("UX_MiniBus_Outbox_OutgoingMessageId", script, StringComparison.Ordinal);
     }
 
     private static MiniBusOutboxStoredOperation CreateStoredOperation()
     {
         return new MiniBusOutboxStoredOperation(
             Guid.NewGuid(),
+            "outgoing-message-1",
             MiniBusOutboxOperationKind.Send,
             BinaryData.FromString("{}"),
             typeof(TestCommand),
@@ -237,6 +263,11 @@ public sealed class SqlPersistenceTests
         {
             MarkedFailed.Add((operationId, exception));
             return Task.CompletedTask;
+        }
+
+        public Task<int> CleanupAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
         }
     }
 

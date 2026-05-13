@@ -34,9 +34,14 @@ services.AddMiniBusSqlPersistence(
     options =>
     {
         options.DispatcherBatchSize = 100;
+        options.OutboxClaimLeaseDuration = TimeSpan.FromMinutes(5);
     });
 ```
 
-Apply `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` to the target SQL Server/Azure SQL database before enabling SQL persistence. Applications that need custom connection ownership can use the existing `DbConnection` factory option instead.
+Apply the scripts in `src/MiniBus.Persistence.Sql/Schema/` to the target SQL Server/Azure SQL database in filename order before enabling SQL persistence. MiniBus does not apply runtime migrations.
+
+The default Functions path lets MiniBus own the inbox/outbox transaction. Applications that need to commit business data and MiniBus persistence state in the same SQL transaction can use `SqlMiniBusPersistenceSessionFactory.CreateForTransaction` from their own application service, but that is an advanced path rather than the sample default.
+
+Applications that need custom connection ownership can use the existing `DbConnection` factory option instead. Cleanup is also application-scheduled: configure retention options such as `InboxRetention`, `DispatchedOutboxRetention`, and `CleanupBatchSize`, then call `ISqlMiniBusOutboxStore.CleanupAsync` from a maintenance job.
 
 The SQL persistence integration tests use Testcontainers when Docker is available and fall back to `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` when an external SQL Server/Azure SQL database should be used. On Apple Silicon, Docker Desktop must be able to run `linux/amd64` SQL Server containers.

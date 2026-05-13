@@ -17,7 +17,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="Schema\001-inbox-outbox.sql" Pack="true" PackagePath="contentFiles\any\any\Schema\" />
+        <None Include="Schema\*.sql" Pack="true" PackagePath="contentFiles\any\any\Schema\" />
     </ItemGroup>
 
 </Project>

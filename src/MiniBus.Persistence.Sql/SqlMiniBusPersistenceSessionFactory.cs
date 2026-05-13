@@ -1,3 +1,5 @@
+using System.Data;
+using System.Data.Common;
 using MiniBus.Core.Persistence;
 
 namespace MiniBus.Persistence.Sql;
@@ -28,6 +30,41 @@ public sealed class SqlMiniBusPersistenceSessionFactory : IMiniBusPersistenceSes
         var connection = _options.ConnectionFactory();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        return new SqlMiniBusPersistenceSession(connection, _tableNames, _operationSerializer);
+        return new SqlMiniBusPersistenceSession(
+            connection,
+            transaction: null,
+            ownsConnection: true,
+            _tableNames,
+            _operationSerializer);
+    }
+
+    public IMiniBusPersistenceSession CreateForTransaction(
+        DbConnection connection,
+        DbTransaction transaction)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (connection.State != ConnectionState.Open)
+        {
+            throw new InvalidOperationException("Application-owned MiniBus SQL transactions require an open DbConnection.");
+        }
+
+        if (transaction.Connection is null)
+        {
+            throw new InvalidOperationException("Application-owned MiniBus SQL transactions require an active DbTransaction.");
+        }
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new InvalidOperationException("Application-owned MiniBus SQL transactions require the transaction to belong to the provided DbConnection.");
+        }
+
+        return new SqlMiniBusPersistenceSession(
+            connection,
+            transaction,
+            ownsConnection: false,
+            _tableNames,
+            _operationSerializer);
     }
 }

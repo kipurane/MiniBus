@@ -146,6 +146,7 @@ public sealed class AzureServiceBusTransportTests
             routes.MapCommand<TestCommand>("billing-queue"));
         var operation = new MiniBusOutboxStoredOperation(
             Guid.NewGuid(),
+            "stored-outgoing-message-1",
             MiniBusOutboxOperationKind.Send,
             BinaryData.FromString("{\"id\":\"42\"}"),
             typeof(TestCommand),
@@ -163,7 +164,8 @@ public sealed class AzureServiceBusTransportTests
         var send = Assert.Single(sender.Sends);
         Assert.Equal("billing-queue", send.Destination);
         Assert.Equal("{\"id\":\"42\"}", send.Message.Body.ToString());
-        Assert.Equal("outbox-message-1", send.Message.MessageId);
+        Assert.Equal("stored-outgoing-message-1", send.Message.MessageId);
+        Assert.Equal("stored-outgoing-message-1", send.Message.ApplicationProperties[MiniBusHeaderNames.MessageId]);
         Assert.Equal("correlation-1", send.Message.CorrelationId);
         Assert.Equal("incoming-message-1", send.Message.ApplicationProperties[MiniBusHeaderNames.CausationId]);
     }
@@ -177,6 +179,7 @@ public sealed class AzureServiceBusTransportTests
             routes.MapCommand<TestCommand>("billing-queue"));
         var operation = new MiniBusOutboxStoredOperation(
             Guid.NewGuid(),
+            "stored-scheduled-message-1",
             MiniBusOutboxOperationKind.Schedule,
             BinaryData.FromString("{}"),
             typeof(TestCommand),

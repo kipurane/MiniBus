@@ -81,7 +81,11 @@ public sealed class AzureServiceBusTransportDispatcher : IMiniBusOutboxDispatche
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation.Kind, "Unsupported MiniBus outbox operation kind.")
         };
 
-        var message = _messageFactory.CreateMessage(operation.Body, operation.MessageType, operation.Headers);
+        var headers = new Dictionary<string, string>(operation.Headers, StringComparer.Ordinal)
+        {
+            [TransportMessageMapping.MiniBusHeaderNames.MessageId] = operation.OutgoingMessageId
+        };
+        var message = _messageFactory.CreateMessage(operation.Body, operation.MessageType, headers);
 
         if (operation.Kind == MiniBusOutboxOperationKind.Schedule)
         {
