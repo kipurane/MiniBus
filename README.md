@@ -79,7 +79,32 @@ services.AddMiniBusSqlPersistence(options =>
 });
 ```
 
-SQL Server-backed integration tests are opt-in. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the SQL persistence tests to verify the packaged schema and persistence behavior against SQL Server/Azure SQL.
+### SQL Integration Tests
+
+`MiniBus.Persistence.Sql.Tests` includes SQL Server-backed integration tests. They use Testcontainers by default when Docker is available, so developers do not need to provision a database manually.
+
+Prerequisites for the Testcontainers path:
+
+- Docker Desktop or another Docker-compatible engine must be running.
+- On Apple Silicon, the engine must be able to run `linux/amd64` containers.
+- The tests use the pinned SQL Server image `mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04` and set the container platform to `linux/amd64`.
+
+Run the SQL persistence tests:
+
+```bash
+dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj
+```
+
+If Docker is unavailable, the SQL Server-backed tests skip with a clear reason and the normal unit tests still run.
+
+To use an existing SQL Server/Azure SQL database instead of Docker, set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the tests:
+
+```bash
+export MINIBUS_SQLSERVER_TEST_CONNECTION_STRING='Server=localhost,1433;Database=master;User Id=sa;Password=Your_password123;TrustServerCertificate=True;Encrypt=True'
+dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj --filter FullyQualifiedName~SqlServerIntegrationTests
+```
+
+When the environment variable is set, the integration tests use that database and create isolated `MiniBusTest_<guid>` schemas inside it. When it is not set, they try the Testcontainers/Docker path.
 
 ## Development Workflow
 

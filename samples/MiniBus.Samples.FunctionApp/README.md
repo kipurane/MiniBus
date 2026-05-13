@@ -38,3 +38,5 @@ services.AddMiniBusSqlPersistence(
 ```
 
 Apply `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` to the target SQL Server/Azure SQL database before enabling SQL persistence. Applications that need custom connection ownership can use the existing `DbConnection` factory option instead.
+
+The SQL persistence integration tests use Testcontainers when Docker is available and fall back to `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` when an external SQL Server/Azure SQL database should be used. On Apple Silicon, Docker Desktop must be able to run `linux/amd64` SQL Server containers.

@@ -1,21 +1,31 @@
 using Microsoft.Data.SqlClient;
+using System.Net.Sockets;
 using System.Text.Json;
+using DotNet.Testcontainers.Builders;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Serialization;
+using Testcontainers.MsSql;
 using Xunit;
 
 namespace MiniBus.Persistence.Sql.Tests;
 
-public sealed class SqlServerIntegrationTests
+public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrationTests.SqlServerFixture>
 {
     private const string ConnectionStringEnvironmentVariable = "MINIBUS_SQLSERVER_TEST_CONNECTION_STRING";
+    private const string SqlServerImage = "mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04";
+    private readonly SqlServerFixture _fixture;
+
+    public SqlServerIntegrationTests(SqlServerFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
     [SqlServerFact]
     public async Task SchemaScript_CanBeAppliedToSqlServer()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
 
         var inboxExists = await database.ObjectExistsAsync("Inbox");
         var outboxExists = await database.ObjectExistsAsync("Outbox");
@@ -27,7 +37,7 @@ public sealed class SqlServerIntegrationTests
     [SqlServerFact]
     public async Task Inbox_RecordsProcessedMessagesAndDetectsDuplicates()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
         await using var session = await database.CreateSessionAsync();
         var message = database.CreateInboxMessage("message-1");
 
@@ -42,7 +52,7 @@ public sealed class SqlServerIntegrationTests
     [SqlServerFact]
     public async Task Commit_CapturesOutboxOperations()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
         await using var session = await database.CreateSessionAsync();
         var operation = CreateOutboxOperation();
 
@@ -69,7 +79,7 @@ public sealed class SqlServerIntegrationTests
     [SqlServerFact]
     public async Task OutboxStore_ClaimsAndUpdatesDispatchState()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
         await using var session = await database.CreateSessionAsync();
 
         await session.CommitAsync(
@@ -93,7 +103,7 @@ public sealed class SqlServerIntegrationTests
     [SqlServerFact]
     public async Task OutboxStore_RecordsFailedDispatchMetadataAndLeavesOperationRetryable()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
         await using var session = await database.CreateSessionAsync();
 
         await session.CommitAsync(
@@ -125,7 +135,7 @@ public sealed class SqlServerIntegrationTests
     [SqlServerFact]
     public async Task Commit_RollsBackInboxRecordWhenOutboxInsertFails()
     {
-        await using var database = await SqlServerTestDatabase.CreateAsync();
+        await using var database = await _fixture.CreateDatabaseAsync();
         await database.DropOutboxTableAsync();
 
         await using var session = await database.CreateSessionAsync();
@@ -155,12 +165,85 @@ public sealed class SqlServerIntegrationTests
 
     private sealed record TestCommand(Guid Id) : ICommand;
 
-    private sealed class SqlServerTestDatabase : IAsyncDisposable
+    public sealed class SqlServerFixture : IAsyncLifetime
+    {
+        private readonly string? _externalConnectionString;
+        private MsSqlContainer? _container;
+        private Exception? _startupException;
+
+        public SqlServerFixture()
+        {
+            _externalConnectionString = Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable);
+        }
+
+        public async Task InitializeAsync()
+        {
+            if (!string.IsNullOrWhiteSpace(_externalConnectionString))
+            {
+                return;
+            }
+
+            try
+            {
+                _container = new MsSqlBuilder()
+                    .WithImage(SqlServerImage)
+                    .WithCreateParameterModifier(parameters =>
+                    {
+                        parameters.Platform = "linux/amd64";
+                    })
+                    .Build();
+
+                await _container.StartAsync();
+            }
+            catch (Exception exception)
+            {
+                _startupException = exception;
+            }
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (_container is not null)
+            {
+                await _container.DisposeAsync();
+            }
+        }
+
+        internal async Task<SqlServerTestDatabase> CreateDatabaseAsync()
+        {
+            if (_startupException is not null)
+            {
+                throw new InvalidOperationException(
+                    $"SQL Server Testcontainers startup failed for {SqlServerImage} on linux/amd64. " +
+                    "On Apple Silicon, ensure Docker Desktop can run amd64 Linux containers. " +
+                    $"Alternatively set {ConnectionStringEnvironmentVariable}. " +
+                    $"Original error: {_startupException.Message}");
+            }
+
+            var connectionString = !string.IsNullOrWhiteSpace(_externalConnectionString)
+                ? _externalConnectionString
+                : _container?.GetConnectionString();
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException(
+                    $"Set {ConnectionStringEnvironmentVariable} or enable Docker to run SQL Server-backed MiniBus persistence tests.");
+            }
+
+            var database = new SqlServerTestDatabase(
+                connectionString,
+                $"MiniBusTest_{Guid.NewGuid():N}");
+            await database.ApplySchemaAsync();
+            return database;
+        }
+    }
+
+    internal sealed class SqlServerTestDatabase : IAsyncDisposable
     {
         private readonly MiniBusSqlPersistenceOptions _options;
         private readonly SqlOutboxOperationSerializer _operationSerializer;
 
-        private SqlServerTestDatabase(string connectionString, string schemaName)
+        internal SqlServerTestDatabase(string connectionString, string schemaName)
         {
             ConnectionString = connectionString;
             SchemaName = schemaName;
@@ -181,23 +264,6 @@ public sealed class SqlServerIntegrationTests
         public string InboxTableName { get; }
 
         public string OutboxTableName { get; }
-
-        public static async Task<SqlServerTestDatabase> CreateAsync()
-        {
-            var connectionString = Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable);
-
-            if (string.IsNullOrWhiteSpace(connectionString))
-            {
-                throw new InvalidOperationException(
-                    $"Set {ConnectionStringEnvironmentVariable} to run SQL Server-backed MiniBus persistence tests.");
-            }
-
-            var database = new SqlServerTestDatabase(
-                connectionString,
-                $"MiniBusTest_{Guid.NewGuid():N}");
-            await database.ApplySchemaAsync();
-            return database;
-        }
 
         public SqlConnection CreateConnection()
         {
@@ -275,12 +341,14 @@ public sealed class SqlServerIntegrationTests
                 """);
         }
 
-        private async Task ApplySchemaAsync()
+        public async Task ApplySchemaAsync()
         {
             var script = File.ReadAllText(Path.GetFullPath(
                 "../../../../../src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql",
                 AppContext.BaseDirectory));
             script = script
+                .Replace("SCHEMA_ID(N'MiniBus')", $"SCHEMA_ID(N'{SchemaName}')", StringComparison.Ordinal)
+                .Replace("CREATE SCHEMA MiniBus", $"CREATE SCHEMA [{SchemaName}]", StringComparison.Ordinal)
                 .Replace("N'MiniBus'", $"N'{SchemaName}'", StringComparison.Ordinal)
                 .Replace("MiniBus.", $"{SchemaName}.", StringComparison.Ordinal);
 
@@ -301,9 +369,47 @@ public sealed class SqlServerIntegrationTests
     {
         public SqlServerFactAttribute()
         {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable)))
+            Timeout = 180_000;
+
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable))
+                && !DockerSocketIsReachable())
             {
-                Skip = $"Set {ConnectionStringEnvironmentVariable} to run SQL Server-backed MiniBus persistence tests.";
+                Skip = "Docker is not reachable, and MINIBUS_SQLSERVER_TEST_CONNECTION_STRING is not set. " +
+                       "Start Docker Desktop with linux/amd64 container support or configure an external SQL Server/Azure SQL test connection string.";
+            }
+        }
+
+        private static bool DockerSocketIsReachable()
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOCKER_HOST")))
+            {
+                return true;
+            }
+
+            return UnixSocketIsReachable("/var/run/docker.sock")
+                   || UnixSocketIsReachable(Path.Combine(
+                       Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                       ".docker",
+                       "run",
+                       "docker.sock"));
+        }
+
+        private static bool UnixSocketIsReachable(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                var connectTask = socket.ConnectAsync(new UnixDomainSocketEndPoint(path));
+                return connectTask.Wait(TimeSpan.FromMilliseconds(250)) && socket.Connected;
+            }
+            catch
+            {
+                return false;
             }
         }
     }
