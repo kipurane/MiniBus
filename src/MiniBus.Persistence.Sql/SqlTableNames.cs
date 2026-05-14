@@ -6,11 +6,14 @@ internal sealed class SqlTableNames
     {
         Inbox = Format(options.SchemaName, options.InboxTableName);
         Outbox = Format(options.SchemaName, options.OutboxTableName);
+        Sagas = Format(options.SchemaName, options.SagaTableName);
     }
 
     public string Inbox { get; }
 
     public string Outbox { get; }
+
+    public string Sagas { get; }
 
     private static string Format(string schemaName, string tableName)
     {

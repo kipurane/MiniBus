@@ -1,8 +1,10 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using MiniBus.AzureFunctions.DependencyInjection;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql.DependencyInjection;
 using Xunit;
@@ -23,6 +25,7 @@ public sealed class SqlPersistenceTests
                     options.SchemaName = "CustomSchema";
                     options.InboxTableName = "CustomInbox";
                     options.OutboxTableName = "CustomOutbox";
+                    options.SagaTableName = "CustomSagas";
                     options.DispatcherBatchSize = 17;
                     options.OutboxClaimLeaseDuration = TimeSpan.FromMinutes(3);
                     options.InboxRetention = TimeSpan.FromDays(30);
@@ -37,6 +40,7 @@ public sealed class SqlPersistenceTests
         Assert.Equal("CustomSchema", options.SchemaName);
         Assert.Equal("CustomInbox", options.InboxTableName);
         Assert.Equal("CustomOutbox", options.OutboxTableName);
+        Assert.Equal("CustomSagas", options.SagaTableName);
         Assert.Equal(17, options.DispatcherBatchSize);
         Assert.Equal(TimeSpan.FromMinutes(3), options.OutboxClaimLeaseDuration);
         Assert.Equal(TimeSpan.FromDays(30), options.InboxRetention);
@@ -86,6 +90,57 @@ public sealed class SqlPersistenceTests
         Assert.NotNull(options.ConnectionFactory);
         using var connection = Assert.IsType<SqlConnection>(options.ConnectionFactory());
         Assert.Contains("from-options", connection.ConnectionString, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_RegistersSqlSagaPersistence()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .BuildServiceProvider();
+
+        Assert.IsType<SqlSagaPersistence>(serviceProvider.GetRequiredService<ISagaPersistence>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_AfterAzureFunctions_OverridesFallbackSagaPersistence()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusAzureFunctions()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .BuildServiceProvider();
+
+        Assert.IsType<SqlSagaPersistence>(serviceProvider.GetRequiredService<ISagaPersistence>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_BeforeAzureFunctions_IsNotOverriddenByFallbackSagaPersistence()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .AddMiniBusAzureFunctions()
+            .BuildServiceProvider();
+
+        Assert.IsType<SqlSagaPersistence>(serviceProvider.GetRequiredService<ISagaPersistence>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_DoesNotOverrideExistingCustomSagaPersistence()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<ISagaPersistence, CustomSagaPersistence>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .BuildServiceProvider();
+
+        Assert.IsType<CustomSagaPersistence>(serviceProvider.GetRequiredService<ISagaPersistence>());
     }
 
     [Fact]
@@ -199,6 +254,23 @@ public sealed class SqlPersistenceTests
         Assert.Contains("UX_MiniBus_Outbox_OutgoingMessageId", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SagaSchemaScript_DefinesSagaOperationalColumns()
+    {
+        var script = File.ReadAllText(Path.GetFullPath(
+            "../../../../../src/MiniBus.Persistence.Sql/Schema/003-sagas.sql",
+            AppContext.BaseDirectory));
+
+        Assert.Contains("CREATE TABLE MiniBus.Sagas", script, StringComparison.Ordinal);
+        Assert.Contains("DataType", script, StringComparison.Ordinal);
+        Assert.Contains("CorrelationId", script, StringComparison.Ordinal);
+        Assert.Contains("Data varbinary(max)", script, StringComparison.Ordinal);
+        Assert.Contains("IsCompleted", script, StringComparison.Ordinal);
+        Assert.Contains("CompletedUtc", script, StringComparison.Ordinal);
+        Assert.Contains("Version rowversion", script, StringComparison.Ordinal);
+        Assert.Contains("UX_MiniBus_Sagas_DataType_CorrelationId", script, StringComparison.Ordinal);
+    }
+
     private static MiniBusOutboxStoredOperation CreateStoredOperation()
     {
         return new MiniBusOutboxStoredOperation(
@@ -213,6 +285,43 @@ public sealed class SqlPersistenceTests
     }
 
     private sealed record TestCommand(Guid Id) : ICommand;
+
+    private sealed class CustomSagaPersistence : ISagaPersistence
+    {
+        public Task<SagaPersistenceRecord<TData>?> LoadAsync<TData>(
+            string correlationId,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task CreateAsync<TData>(
+            TData data,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task SaveAsync<TData>(
+            TData data,
+            string? version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task CompleteAsync<TData>(
+            TData data,
+            string? version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+    }
 
     private sealed class RecordingSerializer : IMessageSerializer
     {

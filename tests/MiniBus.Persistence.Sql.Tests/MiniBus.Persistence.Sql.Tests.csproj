@@ -19,6 +19,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="../../src/MiniBus.AzureFunctions/MiniBus.AzureFunctions.csproj" />
         <ProjectReference Include="../../src/MiniBus.Persistence.Sql/MiniBus.Persistence.Sql.csproj" />
     </ItemGroup>
 

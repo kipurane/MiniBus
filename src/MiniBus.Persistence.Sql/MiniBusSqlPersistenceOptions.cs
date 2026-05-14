@@ -14,6 +14,8 @@ public sealed class MiniBusSqlPersistenceOptions
 
     public string OutboxTableName { get; set; } = "Outbox";
 
+    public string SagaTableName { get; set; } = "Sagas";
+
     public int DispatcherBatchSize { get; set; } = 100;
 
     public TimeSpan OutboxClaimLeaseDuration { get; set; } = TimeSpan.FromMinutes(5);

@@ -14,7 +14,7 @@ The goal is to hide repetitive messaging infrastructure concerns while keeping b
 - Header mapping, message identity, correlation, and causation propagation.
 - Basic recoverability with immediate retries, delayed retries, and dead-lettering.
 - Minimal saga abstractions with explicit correlation and in-memory persistence for tests and samples.
-- SQL Server/Azure SQL inbox/outbox persistence with connection-string setup, deterministic outbox replay ids, explicit schema scripts, and caller-provided `DbConnection` factory escape hatches.
+- SQL Server/Azure SQL inbox, outbox, and saga persistence with connection-string setup, deterministic outbox replay ids, explicit schema scripts, and caller-provided `DbConnection` factory escape hatches.
 
 ## Architecture
 
@@ -55,13 +55,13 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.Core`: message contracts, handler APIs, context, serialization, routing, recoverability, saga abstractions, and persistence abstractions.
 - `src/MiniBus.AzureServiceBus`: Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
 - `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
-- `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
+- `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit tests for core behavior, transport, Functions processing, and SQL persistence components.
 
 ## SQL Persistence
 
-`MiniBus.Persistence.Sql` provides the inbox/outbox contracts, schema script, persistence session, outbox store, and dispatcher. The common SQL Server/Azure SQL setup path uses a connection string:
+`MiniBus.Persistence.Sql` provides the inbox/outbox contracts, SQL saga persistence, schema scripts, persistence session, outbox store, and dispatcher. The common SQL Server/Azure SQL setup path uses a connection string:
 
 ```csharp
 services.AddMiniBusSqlPersistence(
@@ -70,10 +70,15 @@ services.AddMiniBusSqlPersistence(
     {
         options.DispatcherBatchSize = 100;
         options.OutboxClaimLeaseDuration = TimeSpan.FromMinutes(5);
+        options.SagaTableName = "Sagas";
     });
 ```
 
 Run the scripts in `src/MiniBus.Persistence.Sql/Schema/` against the target database in filename order before enabling the package. MiniBus ships explicit SQL scripts instead of applying runtime migrations; applications should apply those scripts through their normal database deployment flow. The packaged scripts target the default `MiniBus` schema and table names. If an application configures custom SQL schema or table names, it must adapt the scripts until MiniBus grows an intentional script-generation story.
+
+When SQL persistence is registered, MiniBus also registers SQL-backed `ISagaPersistence`. Saga data is stored in the configured saga table by saga data type and correlation id, with the serialized saga data, completion flag, completion timestamp, and SQL Server rowversion metadata. Saves and completions use optimistic concurrency; stale updates fail with `SagaPersistenceException` so normal message recoverability can retry or escalate the processing attempt.
+
+SQL saga persistence uses the configured MiniBus serializer for saga data. Keep saga data focused on workflow state rather than large document payloads, and treat data type renames as application-owned data migrations because stored rows are keyed by the saga data type identity.
 
 `MiniBus.Outbox` stores a deterministic outgoing message id for each newly captured operation. If an outbox dispatcher sends a message and crashes before marking the row as dispatched, a later replay uses the same outgoing message id so broker duplicate detection and downstream idempotency can recognize the retry where configured. The `002-outbox-outgoing-message-id.sql` migration backfills existing outbox rows from their row ids because the original capture sequence cannot be reconstructed reliably; drain or manually clean old pending rows before applying it if those legacy rows also require deterministic ids.
 
@@ -148,4 +153,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation. The core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, basic saga support, and SQL inbox/outbox foundation are in place. Production hardening remains planned around SQL saga persistence, observability, and developer tooling.
+This is an early framework implementation. The core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, basic saga support, and SQL inbox/outbox/saga persistence foundation are in place. Production hardening remains planned around observability and developer tooling.

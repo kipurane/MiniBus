@@ -6,6 +6,7 @@ using DotNet.Testcontainers.Builders;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using Testcontainers.MsSql;
 using Xunit;
@@ -30,9 +31,11 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         var inboxExists = await database.ObjectExistsAsync("Inbox");
         var outboxExists = await database.ObjectExistsAsync("Outbox");
+        var sagasExists = await database.ObjectExistsAsync("Sagas");
 
         Assert.True(inboxExists);
         Assert.True(outboxExists);
+        Assert.True(sagasExists);
     }
 
     [SqlServerFact]
@@ -331,6 +334,93 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Equal(1, await database.CountRowsAsync(database.OutboxTableName));
     }
 
+    [SqlServerFact]
+    public async Task SagaPersistence_CreatesLoadsSavesAndCompletesSagaData()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var data = CreateSagaData("saga-lifecycle");
+
+        await persistence.CreateAsync(data);
+
+        var loaded = await persistence.LoadAsync<TestSagaData>("saga-lifecycle");
+        Assert.NotNull(loaded);
+        Assert.False(string.IsNullOrWhiteSpace(loaded.Version));
+        Assert.Equal(data.Id, loaded.Data.Id);
+        Assert.Equal("saga-lifecycle", loaded.Data.CorrelationId);
+        Assert.Equal("started", loaded.Data.Status);
+
+        loaded.Data.Status = "updated";
+        await persistence.SaveAsync(loaded.Data, loaded.Version);
+
+        var saved = await persistence.LoadAsync<TestSagaData>("saga-lifecycle");
+        Assert.NotNull(saved);
+        Assert.Equal("updated", saved.Data.Status);
+        Assert.NotEqual(loaded.Version, saved.Version);
+
+        await persistence.CompleteAsync(saved.Data, saved.Version);
+
+        var completed = await persistence.LoadAsync<TestSagaData>("saga-lifecycle");
+        Assert.NotNull(completed);
+        Assert.True(completed.Data.IsCompleted);
+        Assert.Equal(1, await database.CountRowsAsync(database.SagaTableName));
+        Assert.NotNull(await database.QueryScalarAsync<DateTimeOffset?>(
+            $"SELECT CompletedUtc FROM {database.SagaTableName} WHERE Id = @Id;",
+            data.Id));
+    }
+
+    [SqlServerFact]
+    public async Task SagaPersistence_RejectsDuplicateMissingAndStaleState()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var data = CreateSagaData("saga-concurrency");
+
+        await persistence.CreateAsync(data);
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.CreateAsync(CreateSagaData("saga-concurrency")));
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(CreateSagaData("missing-saga"), version: "AQIDBA=="));
+
+        var firstLoad = await persistence.LoadAsync<TestSagaData>("saga-concurrency");
+        var secondLoad = await persistence.LoadAsync<TestSagaData>("saga-concurrency");
+        Assert.NotNull(firstLoad);
+        Assert.NotNull(secondLoad);
+
+        firstLoad.Data.Status = "first";
+        await persistence.SaveAsync(firstLoad.Data, firstLoad.Version);
+
+        secondLoad.Data.Status = "second";
+        var stale = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(secondLoad.Data, secondLoad.Version));
+        Assert.Contains("stale version", stale.Message, StringComparison.Ordinal);
+    }
+
+    [SqlServerFact]
+    public async Task SagaPersistence_RoundTripsReferenceTypeProperties()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var data = CreateSagaData("saga-serialization");
+        data.Details = new TestSagaDetails
+        {
+            CustomerId = "customer-1",
+            Attempts = new List<int> { 1, 2, 3 }
+        };
+
+        await persistence.CreateAsync(data);
+
+        var loaded = await persistence.LoadAsync<TestSagaData>("saga-serialization");
+
+        Assert.NotNull(loaded);
+        Assert.NotSame(data, loaded.Data);
+        Assert.NotNull(loaded.Data.Details);
+        Assert.Equal("customer-1", loaded.Data.Details.CustomerId);
+        Assert.Equal(new[] { 1, 2, 3 }, loaded.Data.Details.Attempts);
+    }
+
     private static MiniBusOutboxOperation CreateOutboxOperation()
     {
         return new MiniBusOutboxOperation(
@@ -345,7 +435,37 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             DueTime: null);
     }
 
+    private static TestSagaData CreateSagaData(string correlationId)
+    {
+        return new TestSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = correlationId,
+            Status = "started"
+        };
+    }
+
     private sealed record TestCommand(Guid Id) : ICommand;
+
+    public sealed class TestSagaData : ISagaData
+    {
+        public Guid Id { get; set; }
+
+        public string CorrelationId { get; set; } = string.Empty;
+
+        public bool IsCompleted { get; set; }
+
+        public string Status { get; set; } = string.Empty;
+
+        public TestSagaDetails? Details { get; set; }
+    }
+
+    public sealed class TestSagaDetails
+    {
+        public string CustomerId { get; set; } = string.Empty;
+
+        public List<int> Attempts { get; set; } = new();
+    }
 
     public sealed class SqlServerFixture : IAsyncLifetime
     {
@@ -436,6 +556,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             SchemaName = schemaName;
             InboxTableName = $"[{SchemaName}].[Inbox]";
             OutboxTableName = $"[{SchemaName}].[Outbox]";
+            SagaTableName = $"[{SchemaName}].[Sagas]";
             BusinessTableName = $"[{SchemaName}].[BusinessData]";
             _options = new MiniBusSqlPersistenceOptions
             {
@@ -453,6 +574,8 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         public string InboxTableName { get; }
 
         public string OutboxTableName { get; }
+
+        public string SagaTableName { get; }
 
         public string BusinessTableName { get; }
 
@@ -474,6 +597,13 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         public ISqlMiniBusOutboxStore CreateOutboxStore()
         {
             return new SqlMiniBusOutboxStore(_options, _operationSerializer);
+        }
+
+        public ISagaPersistence CreateSagaPersistence()
+        {
+            return new SqlSagaPersistence(
+                _options,
+                new SqlSagaDataSerializer(new JsonMessageSerializer()));
         }
 
         public MiniBusInboxMessage CreateInboxMessage(string messageId)
@@ -581,6 +711,9 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
                 IF OBJECT_ID(N'{SchemaName}.Outbox', N'U') IS NOT NULL
                     DROP TABLE {OutboxTableName};
+
+                IF OBJECT_ID(N'{SchemaName}.Sagas', N'U') IS NOT NULL
+                    DROP TABLE {SagaTableName};
 
                 IF OBJECT_ID(N'{SchemaName}.Inbox', N'U') IS NOT NULL
                     DROP TABLE {InboxTableName};
@@ -700,7 +833,9 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         public object Deserialize(BinaryData body, Type messageType)
         {
-            throw new NotSupportedException();
+            using var stream = body.ToStream();
+            return JsonSerializer.Deserialize(stream, messageType)
+                   ?? throw new InvalidOperationException($"Failed to deserialize body as {messageType.FullName}.");
         }
     }
 }
