@@ -466,6 +466,30 @@ public sealed class MiniBusProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_WithoutSettlementSkipsDuplicateSqlInboxMessageWithoutInvokingHandlers()
+    {
+        var recorder = new HandlerRecorder();
+        var session = new RecordingPersistenceSession { IsProcessed = true };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-message"
+        });
+
+        await processor.ProcessAsync(message);
+
+        Assert.Empty(recorder.Invocations);
+        Assert.Equal("original-message", session.CheckedMessage?.MessageId);
+        Assert.Null(session.CommittedMessage);
+    }
+
+    [Fact]
     public async Task ProcessAsync_WithSqlOutboxCapturesOperationsAndCommitsBeforeCompleting()
     {
         var recorder = new HandlerRecorder();

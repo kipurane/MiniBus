@@ -30,6 +30,9 @@ MiniBus Azure Functions adapter
 MiniBus processor
         |
         v
+Internal processing pipeline
+        |
+        v
 Deserialize message
         |
         v
@@ -44,6 +47,8 @@ Dispatch outgoing messages directly or through the outbox
         v
 Complete, retry, schedule retry, or dead-letter
 ```
+
+The processor keeps the Azure Functions-facing API small and delegates internal orchestration to ordered pipeline behaviors for metadata adaptation, type resolution, deserialization, persistence, handler and saga invocation, recoverability, and settlement. The pipeline is an internal framework seam; application code still depends on message contracts, handlers, and `MiniBusContext` rather than middleware types.
 
 ## Projects
 
