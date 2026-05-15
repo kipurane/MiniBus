@@ -1261,8 +1261,6 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 - [x] Implement Blob payload store.
 - [x] Implement large payload/DataBus/claim-check support.
 - [x] Add receive-side claim-check resolution before deserialization.
-- [ ] Implement optional Table Storage inbox.
-- [ ] Implement optional Table Storage saga store.
 - [ ] Implement audit blob writer.
 - [x] Add Testcontainers-backed Azurite or live-resource-gated integration tests for Blob payload storage.
 
@@ -1298,6 +1296,7 @@ This list captures capabilities that may become valuable later but should not di
 - [ ] Add batch sending if throughput requirements justify it.
 - [ ] Add advanced retry and exception classification policies.
 - [ ] Add manual retry tooling or dashboard support.
+- [ ] Add optional Azure Table Storage inbox and saga persistence if MiniBus needs a SQL-free Azure Storage reliability mode for lightweight/serverless workloads.
 - [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
 - [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
 - [ ] Add an optional one-topic-per-event-type topology if the shared topic plus subscription filter model becomes too limiting.
