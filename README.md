@@ -128,6 +128,25 @@ Run the SQL persistence tests:
 dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj
 ```
 
+## Azure Storage payload persistence
+
+Azure Storage payload persistence is opt-in through `MiniBus.Persistence.AzureStorage`. The first supported storage primitive is a Blob-backed payload store for opaque payload bytes; full claim-check/DataBus message processing is planned separately.
+
+```csharp
+services.AddMiniBusAzureStoragePersistence(
+    connectionString,
+    containerName: "minibus-payloads",
+    options =>
+    {
+        options.BlobNamePrefix = "payloads";
+        options.PayloadRetention = TimeSpan.FromDays(7);
+    });
+```
+
+Applications can also register a caller-provided `BlobContainerClient` factory when they need custom Azure SDK client ownership. The payload store returns MiniBus-owned payload references containing container name, blob name, payload id, length, content type, creation timestamp, and optional expiry timestamp; handlers and message contracts do not need to reference Azure SDK types.
+
+`MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same integration coverage against an external Azure Storage account instead of starting Azurite. If neither Docker nor a live connection string is available, those integration tests skip with a clear reason.
+
 If Docker is unavailable, the SQL Server-backed tests skip with a clear reason and the normal unit tests still run.
 
 To use an existing SQL Server/Azure SQL database instead of Docker, set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the tests:

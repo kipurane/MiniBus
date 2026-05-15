@@ -1257,14 +1257,14 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 ### 24.4 Azure Storage support
 
-- [ ] Create `MiniBus.Persistence.AzureStorage` or equivalent storage package.
-- [ ] Implement Blob payload store.
+- [x] Create `MiniBus.Persistence.AzureStorage` or equivalent storage package.
+- [x] Implement Blob payload store.
 - [ ] Implement large payload/DataBus/claim-check support.
 - [ ] Add receive-side claim-check resolution before deserialization.
 - [ ] Implement optional Table Storage inbox.
 - [ ] Implement optional Table Storage saga store.
 - [ ] Implement audit blob writer.
-- [ ] Add Azurite-backed or live-resource-gated integration tests.
+- [x] Add Testcontainers-backed Azurite or live-resource-gated integration tests for Blob payload storage.
 
 ### 24.5 Observability
 
