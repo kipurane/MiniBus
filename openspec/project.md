@@ -1213,9 +1213,9 @@ Implement:
 
 ## 24. Remaining feature backlog
 
-This list is the updateable checklist of work still needed for MiniBus to become a fully operational framework. Keep it current as OpenSpec changes are proposed, implemented, and archived.
+This list is the updateable checklist of near-term work still needed for MiniBus to become a fully operational framework. Keep it current as OpenSpec changes are proposed, implemented, and archived. Conditional or long-range ideas belong in the deferred feature backlog.
 
-Next major framework feature: **saga timeout support**. SQL Server/Azure SQL inbox/outbox and saga persistence are now first-class enough for durable workflows; the remaining saga gap is a clear API and storage/transport strategy for scheduling and dispatching timeouts.
+Saga timeout support now uses Service Bus scheduled messages, with SQL outbox capture for durable workflows. The next major framework feature should come from the active backlog below.
 
 ### 24.1 Core and processing architecture
 
@@ -1245,14 +1245,13 @@ Next major framework feature: **saga timeout support**. SQL Server/Azure SQL inb
 
 ### 24.3 Saga follow-ups
 
-Basic saga contracts, correlation, invocation, in-memory persistence, and SQL persistence exist. The remaining saga work is timeout behavior.
+Basic saga contracts, correlation, invocation, in-memory persistence, SQL persistence, and Service Bus-backed timeout behavior exist.
 
 - [x] Implement SQL saga persistence.
 - [x] Implement durable optimistic concurrency using SQL version metadata.
 - [x] Ensure saga persistence failures and concurrency conflicts flow through recoverability.
 - [x] Add saga timeout scheduling APIs or conventions.
 - [x] Decide whether saga timeouts use Service Bus scheduled messages only or an optional SQL timeout table.
-- [ ] Implement optional SQL timeout table and dispatcher if durable SQL-managed timeouts are desired.
 - [x] Add integration tests for SQL saga load/create/save/complete and concurrency conflicts.
 - [x] Add integration tests for saga timeout dispatch.
 
@@ -1288,18 +1287,24 @@ Basic saga contracts, correlation, invocation, in-memory persistence, and SQL pe
 - [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [ ] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
-### 24.7 Transport and advanced deferred items
+---
 
+## 25. Deferred feature backlog
+
+This list captures capabilities that may become valuable later but should not distract from the active framework baseline. Promote an item into the remaining feature backlog only when there is a clear use case, an OpenSpec proposal, and a reason to implement it in the next planning horizon.
+
+- [ ] Add a SQL-managed scheduled-message store and dispatcher if MiniBus needs transport-independent delayed delivery, timeout cancellation/replacement, or operational inspection beyond Azure Service Bus scheduled messages.
 - [ ] Add Service Bus sessions support where ordering or saga-heavy workflows need it.
 - [ ] Add batch sending if throughput requirements justify it.
 - [ ] Add advanced retry and exception classification policies.
 - [ ] Add manual retry tooling or dashboard support.
 - [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
 - [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
+- [ ] Add an optional one-topic-per-event-type topology if the shared topic plus subscription filter model becomes too limiting.
 
 ---
 
-## 25. Non-goals
+## 26. Non-goals
 
 MiniBus should not initially support:
 
@@ -1319,9 +1324,9 @@ These can be revisited later only if there is a clear use case.
 
 ---
 
-## 26. Important design decisions
+## 27. Important design decisions
 
-### 26.1 Use SQL as the primary reliability store
+### 27.1 Use SQL as the primary reliability store
 
 SQL is the preferred persistence option for:
 
@@ -1332,31 +1337,31 @@ SQL is the preferred persistence option for:
 
 Azure Storage is useful but should not be the primary consistency mechanism when business data is also in SQL.
 
-### 26.2 Keep Azure Functions as adapter only
+### 27.2 Keep Azure Functions as adapter only
 
 The framework should not put business logic in function classes.
 
 Function classes should only call `MiniBusProcessor`.
 
-### 26.3 Prefer explicit routes
+### 27.3 Prefer explicit routes
 
 Do not rely too much on naming conventions.
 
 Explicit routing makes Copilot-generated code safer and makes production behavior more predictable.
 
-### 26.4 Outbox should be opt-in for MVP, but strongly recommended
+### 27.4 Outbox should be opt-in for MVP, but strongly recommended
 
 During early MVP, simple send/publish can work without outbox.
 
 For production business workflows, outbox should be enabled.
 
-### 26.5 Support manual wrappers before source generation
+### 27.5 Support manual wrappers before source generation
 
 Source generation improves developer experience, but manual trigger wrappers are easier to debug and should come first.
 
 ---
 
-## 27. Example end-to-end flow
+## 28. Example end-to-end flow
 
 Example command:
 
@@ -1431,7 +1436,7 @@ public sealed class BillingInputFunction
 
 ---
 
-## 28. Open questions
+## 29. Open questions
 
 These should be decided before or during early implementation.
 
@@ -1448,7 +1453,7 @@ These should be decided before or during early implementation.
 
 ---
 
-## 29. First OpenSpec change suggestion
+## 30. First OpenSpec change suggestion
 
 Suggested first OpenSpec change:
 
@@ -1487,7 +1492,7 @@ Suggested first implementation tasks:
 
 ---
 
-## 30. Copilot guidance
+## 31. Copilot guidance
 
 When using GitHub Copilot, prefer small implementation prompts.
 
