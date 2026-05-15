@@ -106,6 +106,11 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
             [MiniBusHeaderNames.CorrelationId] = CorrelationId,
             [MiniBusHeaderNames.CausationId] = MessageId
         };
+        // Outgoing operations must not reuse receive-side type metadata; the transport
+        // assigns these headers from the actual outgoing message type.
+        outgoingHeaders.Remove(MiniBusHeaderNames.MessageType);
+        outgoingHeaders.Remove(MiniBusHeaderNames.EnclosedMessageTypes);
+        outgoingHeaders.Remove(MiniBusHeaderNames.ContentType);
 
         return outgoingHeaders;
     }

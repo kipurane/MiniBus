@@ -53,6 +53,7 @@ public static class MiniBusFunctionAppConfiguration
         routes.MapCommand<CreateInvoice>("billing-queue");
         routes.MapCommand<SendInvoiceReceipt>("billing-receipts");
         routes.MapEvent<InvoiceCreated>("domain-events");
+        routes.MapScheduledMessage<InvoicePaymentTimeout>("billing-timeouts");
 
         return routes;
     }

@@ -246,6 +246,159 @@ public sealed class SagaTests
         Assert.True(stored.Data.IsCompleted);
     }
 
+    [Fact]
+    public async Task Saga_RequestTimeoutWithAbsoluteDueTimeSchedulesTimeoutMessage()
+    {
+        var saga = new OrderSaga();
+        var context = new RecordingMiniBusContext();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        await saga.RequestTimeoutForTest(new OrderTimeout("order-1"), dueTime, context);
+
+        var schedule = Assert.Single(context.Schedules);
+        Assert.Equal(new OrderTimeout("order-1"), schedule.Message);
+        Assert.Equal(dueTime, schedule.DueTime);
+    }
+
+    [Fact]
+    public async Task Saga_RequestTimeoutWithDelaySchedulesTimeoutMessageInFuture()
+    {
+        var saga = new OrderSaga();
+        var context = new RecordingMiniBusContext();
+        var before = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        await saga.RequestTimeoutForTest(new OrderTimeout("order-1"), TimeSpan.FromMinutes(5), context);
+
+        var after = DateTimeOffset.UtcNow.AddMinutes(5);
+        var schedule = Assert.Single(context.Schedules);
+        Assert.Equal(new OrderTimeout("order-1"), schedule.Message);
+        Assert.InRange(schedule.DueTime, before, after);
+    }
+
+    [Fact]
+    public async Task Saga_RequestTimeoutValidatesInputs()
+    {
+        var saga = new OrderSaga();
+        var context = new RecordingMiniBusContext();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            saga.RequestTimeoutForTest(null!, DateTimeOffset.UtcNow, context));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            saga.RequestTimeoutForTest(new OrderTimeout("order-1"), DateTimeOffset.UtcNow, null!));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            saga.RequestTimeoutForTest(new OrderTimeout("order-1"), TimeSpan.FromTicks(-1), context));
+
+        Assert.Empty(context.Schedules);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_TimeoutMessageUsesContinuingCorrelation()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Step = "started"
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new OrderTimeout("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("timed-out", stored.Data.Step);
+        Assert.Equal(1, OrderSaga.TimeoutCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_TimeoutMessageDoesNotCreateSagaWhenMappedAsContinuing()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new OrderTimeout("missing-order"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("missing-order");
+        Assert.Null(stored);
+        Assert.Equal(0, OrderSaga.TimeoutCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_TimeoutMessageCanStartSagaWhenExplicitlyMappedAsStartingMessage()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutStartingSaga, OrderSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+
+        await invoker.InvokeAsync(
+            new OrderTimeout("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("started-by-timeout", stored.Data.Step);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_DoesNotInvokeTimeoutForCompletedSaga()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            IsCompleted = true
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await invoker.InvokeAsync(
+            new OrderTimeout("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        Assert.Equal(0, OrderSaga.TimeoutCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_DoesNotSaveStateWhenTimeoutHandlerFails()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Step = "started"
+        });
+        var invoker = CreateInvoker(persistence);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invoker.InvokeAsync(
+            new FailingOrderTimeout("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None));
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.Equal("started", stored.Data.Step);
+    }
+
     private static SagaInvoker CreateInvoker(ISagaPersistence persistence)
     {
         var registry = new SagaRegistry();
@@ -258,6 +411,7 @@ public sealed class SagaTests
     {
         OrderSaga.StartedCount = 0;
         OrderSaga.BilledCount = 0;
+        OrderSaga.TimeoutCount = 0;
         OrderSaga.LastContext = null;
     }
 
@@ -268,6 +422,10 @@ public sealed class SagaTests
     private sealed record FailOrder(string OrderId) : IEvent;
 
     private sealed record CompleteOrder(string OrderId) : IEvent;
+
+    private sealed record OrderTimeout(string OrderId) : ISagaTimeout;
+
+    private sealed record FailingOrderTimeout(string OrderId) : ISagaTimeout;
 
     private sealed class OrderSagaData : ISagaData
     {
@@ -287,11 +445,15 @@ public sealed class SagaTests
         IHandleSagaMessages<StartOrder>,
         IHandleSagaMessages<OrderBilled>,
         IHandleSagaMessages<FailOrder>,
-        IHandleSagaMessages<CompleteOrder>
+        IHandleSagaMessages<CompleteOrder>,
+        IHandleSagaMessages<OrderTimeout>,
+        IHandleSagaMessages<FailingOrderTimeout>
     {
         public static int StartedCount { get; set; }
 
         public static int BilledCount { get; set; }
+
+        public static int TimeoutCount { get; set; }
 
         public static MiniBusContext? LastContext { get; set; }
 
@@ -300,7 +462,9 @@ public sealed class SagaTests
             mapper.StartsWith<StartOrder>(message => message.OrderId)
                 .Correlate<OrderBilled>(message => message.OrderId)
                 .Correlate<FailOrder>(message => message.OrderId)
-                .Correlate<CompleteOrder>(message => message.OrderId);
+                .Correlate<CompleteOrder>(message => message.OrderId)
+                .Correlate<OrderTimeout>(message => message.OrderId)
+                .Correlate<FailingOrderTimeout>(message => message.OrderId);
         }
 
         public Task Handle(StartOrder message, MiniBusContext context, CancellationToken cancellationToken)
@@ -330,9 +494,54 @@ public sealed class SagaTests
             return Task.CompletedTask;
         }
 
+        public Task Handle(OrderTimeout message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            TimeoutCount++;
+            Data.Step = "timed-out";
+            return Task.CompletedTask;
+        }
+
+        public Task Handle(FailingOrderTimeout message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Step = "timeout-failed";
+            throw new InvalidOperationException("timeout failed");
+        }
+
         public void AttachForTest(OrderSagaData data)
         {
             AttachData(data);
+        }
+
+        public Task RequestTimeoutForTest(
+            OrderTimeout timeout,
+            DateTimeOffset dueTime,
+            MiniBusContext context)
+        {
+            return RequestTimeout(timeout, dueTime, context);
+        }
+
+        public Task RequestTimeoutForTest(
+            OrderTimeout timeout,
+            TimeSpan delay,
+            MiniBusContext context)
+        {
+            return RequestTimeout(timeout, delay, context);
+        }
+    }
+
+    private sealed class TimeoutStartingSaga :
+        MiniBusSaga<OrderSagaData>,
+        IHandleSagaMessages<OrderTimeout>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
+        {
+            mapper.StartsWith<OrderTimeout>(message => message.OrderId);
+        }
+
+        public Task Handle(OrderTimeout message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Step = "started-by-timeout";
+            return Task.CompletedTask;
         }
     }
 
@@ -353,6 +562,8 @@ public sealed class SagaTests
 
     private sealed class RecordingMiniBusContext : MiniBusContext
     {
+        public List<(object Message, DateTimeOffset DueTime)> Schedules { get; } = new();
+
         public override string EndpointName => "Tests";
 
         public override string MessageId => "message-id";
@@ -378,6 +589,7 @@ public sealed class SagaTests
 
         public override Task Schedule<TMessage>(TMessage message, DateTimeOffset dueTime, CancellationToken cancellationToken = default)
         {
+            Schedules.Add((message!, dueTime));
             return Task.CompletedTask;
         }
     }

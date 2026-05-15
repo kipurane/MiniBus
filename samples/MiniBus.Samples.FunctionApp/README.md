@@ -6,7 +6,7 @@ This sample is a minimal buildable Azure Functions-oriented project that shows t
 - `AddMiniBusAzureFunctions` registration
 - `SystemTextJsonMessageSerializer` registration
 - regular handler registration
-- basic saga registration that reacts to `InvoiceCreated`
+- basic saga registration that reacts to `InvoiceCreated` and requests a timeout
 - Azure Service Bus route and dispatcher registration
 - recoverability settings
 
@@ -25,6 +25,8 @@ The sample is intended to compile without provisioning Azure resources.
 `Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. The sample intentionally avoids owning the full Functions host executable until the project has a reusable host template.
 
 The registered `SampleServiceBusSender` is a placeholder that throws if outgoing dispatch is attempted. Replace it with `AzureServiceBusSender` backed by an Azure `ServiceBusClient` when connecting the sample to a real Service Bus namespace.
+
+`BillingSaga` shows the saga timeout pattern. The timeout is an ordinary MiniBus message implementing `ISagaTimeout`; the saga requests it with `RequestTimeout`, correlates it back with `Correlate<InvoicePaymentTimeout>`, and the transport schedules it through the `billing-timeouts` route. This version uses Azure Service Bus scheduled messages as the timeout mechanism. MiniBus does not add a SQL timeout table or SQL-managed timeout dispatcher for this path.
 
 SQL inbox/outbox persistence is intentionally not wired into the sample's default build. A real Function App can add it next to the existing MiniBus registration:
 

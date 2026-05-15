@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Net.Sockets;
 using System.Text.Json;
 using DotNet.Testcontainers.Builders;
+using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
@@ -421,6 +422,70 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Equal(new[] { 1, 2, 3 }, loaded.Data.Details.Attempts);
     }
 
+    [SqlServerFact]
+    public async Task SagaTimeout_SuccessPersistsSagaStateAndOutboxSchedule()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutRequestSaga, TestSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+        var dueTime = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var context = new RecordingMiniBusContext();
+
+        await invoker.InvokeAsync(
+            new StartTimeoutSaga("saga-timeout", dueTime),
+            context,
+            EmptyServiceProvider.Instance);
+
+        await using var session = await database.CreateSessionAsync();
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-timeout"),
+            context.Operations);
+
+        var saga = await persistence.LoadAsync<TestSagaData>("saga-timeout");
+        Assert.NotNull(saga);
+        Assert.Equal("timeout-requested", saga.Data.Status);
+        Assert.Equal(1, await database.CountRowsAsync(database.SagaTableName));
+
+        await using var connection = database.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT OperationKind, MessageType, HeadersJson, DueTime
+            FROM {database.OutboxTableName};
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(MiniBusOutboxOperationKind.Schedule.ToString(), reader.GetString(0));
+        Assert.Contains(nameof(TestTimeout), reader.GetString(1), StringComparison.Ordinal);
+        Assert.Contains("correlation-1", reader.GetString(2), StringComparison.Ordinal);
+        Assert.Contains("message-1", reader.GetString(2), StringComparison.Ordinal);
+        Assert.Equal(dueTime, reader.GetFieldValue<DateTimeOffset>(3));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [SqlServerFact]
+    public async Task SagaTimeout_FailedSagaDoesNotCommitOutboxSchedule()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<FailingTimeoutRequestSaga, TestSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+        var context = new RecordingMiniBusContext();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invoker.InvokeAsync(
+            new StartTimeoutSaga("saga-timeout-failure", DateTimeOffset.UtcNow.AddMinutes(5)),
+            context,
+            EmptyServiceProvider.Instance));
+
+        Assert.Single(context.Operations);
+        Assert.Equal(0, await database.CountRowsAsync(database.SagaTableName));
+        Assert.Equal(0, await database.CountRowsAsync(database.OutboxTableName));
+    }
+
     private static MiniBusOutboxOperation CreateOutboxOperation()
     {
         return new MiniBusOutboxOperation(
@@ -447,6 +512,10 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
     private sealed record TestCommand(Guid Id) : ICommand;
 
+    private sealed record StartTimeoutSaga(string CorrelationId, DateTimeOffset DueTime) : ICommand;
+
+    private sealed record TestTimeout(string CorrelationId) : ISagaTimeout;
+
     public sealed class TestSagaData : ISagaData
     {
         public Guid Id { get; set; }
@@ -465,6 +534,114 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         public string CustomerId { get; set; } = string.Empty;
 
         public List<int> Attempts { get; set; } = new();
+    }
+
+    private sealed class TimeoutRequestSaga :
+        MiniBusSaga<TestSagaData>,
+        IHandleSagaMessages<StartTimeoutSaga>,
+        IHandleSagaMessages<TestTimeout>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<TestSagaData> mapper)
+        {
+            mapper.StartsWith<StartTimeoutSaga>(message => message.CorrelationId)
+                .Correlate<TestTimeout>(message => message.CorrelationId);
+        }
+
+        public async Task Handle(StartTimeoutSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Status = "timeout-requested";
+            await RequestTimeout(
+                    new TestTimeout(message.CorrelationId),
+                    message.DueTime,
+                    context,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public Task Handle(TestTimeout message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Status = "timed-out";
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FailingTimeoutRequestSaga :
+        MiniBusSaga<TestSagaData>,
+        IHandleSagaMessages<StartTimeoutSaga>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<TestSagaData> mapper)
+        {
+            mapper.StartsWith<StartTimeoutSaga>(message => message.CorrelationId);
+        }
+
+        public async Task Handle(StartTimeoutSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            await RequestTimeout(
+                    new TestTimeout(message.CorrelationId),
+                    message.DueTime,
+                    context,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            throw new InvalidOperationException("saga failed");
+        }
+    }
+
+    private sealed class RecordingMiniBusContext : MiniBusContext
+    {
+        public List<MiniBusOutboxOperation> Operations { get; } = new();
+
+        public override string EndpointName => "Billing";
+
+        public override string MessageId => "message-1";
+
+        public override string CorrelationId => "correlation-1";
+
+        public override string? CausationId => null;
+
+        public override IReadOnlyDictionary<string, string> Headers { get; } = new Dictionary<string, string>
+        {
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        };
+
+        public override Task Send<TCommand>(TCommand command, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override Task Publish<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override Task Schedule<TMessage>(
+            TMessage message,
+            DateTimeOffset dueTime,
+            CancellationToken cancellationToken = default)
+        {
+            Operations.Add(new MiniBusOutboxOperation(
+                MiniBusOutboxOperationKind.Schedule,
+                message!,
+                typeof(TMessage),
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [MiniBusHeaderNames.CorrelationId] = CorrelationId,
+                    [MiniBusHeaderNames.CausationId] = MessageId
+                },
+                dueTime));
+
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class EmptyServiceProvider : IServiceProvider
+    {
+        public static EmptyServiceProvider Instance { get; } = new();
+
+        public object? GetService(Type serviceType)
+        {
+            return null;
+        }
     }
 
     public sealed class SqlServerFixture : IAsyncLifetime

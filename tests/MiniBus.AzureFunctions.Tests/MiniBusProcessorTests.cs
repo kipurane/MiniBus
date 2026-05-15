@@ -422,6 +422,82 @@ public sealed class MiniBusProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_SagaTimeoutRequestDirectlySchedulesThroughTransportWhenOutboxIsDisabled()
+    {
+        TimeoutRequestSaga.Reset();
+        var sender = new RecordingSender();
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutRequestSaga, BillingSagaData>();
+        var dueTime = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var processor = CreateProcessor(new RecordingSerializer(new StartTimeoutSaga("billing-1", dueTime)), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(persistence);
+            services.AddSingleton<SagaInvoker>();
+            RegisterTransport(services, sender, routes =>
+                routes.MapScheduledMessage<BillingTimeout>("billing-timeouts"));
+        }, options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartTimeoutSaga).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("billing-timeouts", schedule.Destination);
+        Assert.Equal(dueTime, schedule.DueTime);
+        Assert.Equal("message-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.CausationId]);
+        Assert.Equal("correlation-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.CorrelationId]);
+        Assert.Equal(typeof(BillingTimeout).AssemblyQualifiedName, schedule.Message.Subject);
+        Assert.Same(message, actions.CompletedMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_SagaTimeoutRequestIsCapturedAsOutboxScheduleWhenOutboxIsEnabled()
+    {
+        TimeoutRequestSaga.Reset();
+        var sender = new RecordingSender();
+        var session = new RecordingPersistenceSession();
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutRequestSaga, BillingSagaData>();
+        var dueTime = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var processor = CreateProcessor(new RecordingSerializer(new StartTimeoutSaga("billing-1", dueTime)), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(persistence);
+            services.AddSingleton<SagaInvoker>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+            RegisterTransport(services, sender, routes =>
+                routes.MapScheduledMessage<BillingTimeout>("billing-timeouts"));
+        }, options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartTimeoutSaga).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        var operation = Assert.Single(session.CommittedOperations);
+        Assert.Equal(MiniBusOutboxOperationKind.Schedule, operation.Kind);
+        Assert.Equal(typeof(BillingTimeout), operation.MessageType);
+        Assert.Equal(new BillingTimeout("billing-1"), operation.Message);
+        Assert.Equal(dueTime, operation.DueTime);
+        Assert.Equal("message-1", operation.Headers[MiniBusHeaderNames.CausationId]);
+        Assert.Equal("correlation-1", operation.Headers[MiniBusHeaderNames.CorrelationId]);
+        Assert.Empty(sender.Schedules);
+        Assert.Same(message, actions.CompletedMessage);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ThrowsWhenSagasAreEnabledWithoutSagaInvoker()
     {
         var processor = CreateProcessor(
@@ -616,6 +692,10 @@ public sealed class MiniBusProcessorTests
 
     private sealed record StartBillingSaga(string BillingId) : ICommand;
 
+    private sealed record StartTimeoutSaga(string BillingId, DateTimeOffset DueTime) : ICommand;
+
+    private sealed record BillingTimeout(string BillingId) : ISagaTimeout;
+
     private sealed class HandlerRecorder
     {
         public List<Invocation> Invocations { get; } = new();
@@ -652,6 +732,43 @@ public sealed class MiniBusProcessorTests
             HandledCount++;
             LastContext = context;
             Data.Step = "started";
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class TimeoutRequestSaga :
+        MiniBusSaga<BillingSagaData>,
+        IHandleSagaMessages<StartTimeoutSaga>,
+        IHandleSagaMessages<BillingTimeout>
+    {
+        public static int TimeoutHandledCount { get; private set; }
+
+        public static void Reset()
+        {
+            TimeoutHandledCount = 0;
+        }
+
+        public override void ConfigureHowToFindSaga(SagaMapper<BillingSagaData> mapper)
+        {
+            mapper.StartsWith<StartTimeoutSaga>(message => message.BillingId)
+                .Correlate<BillingTimeout>(message => message.BillingId);
+        }
+
+        public async Task Handle(StartTimeoutSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Step = "timeout-requested";
+            await RequestTimeout(
+                    new BillingTimeout(message.BillingId),
+                    message.DueTime,
+                    context,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public Task Handle(BillingTimeout message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            TimeoutHandledCount++;
+            Data.Step = "timed-out";
             return Task.CompletedTask;
         }
     }

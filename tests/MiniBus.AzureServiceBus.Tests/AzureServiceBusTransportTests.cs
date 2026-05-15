@@ -6,6 +6,7 @@ using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -139,6 +140,23 @@ public sealed class AzureServiceBusTransportTests
     }
 
     [Fact]
+    public async Task Dispatcher_SchedulesSagaTimeoutToExplicitScheduledDestination()
+    {
+        var sender = new RecordingSender();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(10);
+        var dispatcher = CreateDispatcher(sender, routes =>
+            routes.MapScheduledMessage<TestTimeout>("saga-timeouts"));
+
+        var sequenceNumber = await dispatcher.ScheduleAsync(new TestTimeout("saga-1"), dueTime);
+
+        Assert.Equal(42L, sequenceNumber);
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("saga-timeouts", schedule.Destination);
+        Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+        Assert.Equal(typeof(TestTimeout).AssemblyQualifiedName, schedule.Message.Subject);
+    }
+
+    [Fact]
     public async Task Dispatcher_DispatchesPersistedOutboxOperationWithStoredHeaders()
     {
         var sender = new RecordingSender();
@@ -192,6 +210,41 @@ public sealed class AzureServiceBusTransportTests
         var schedule = Assert.Single(sender.Schedules);
         Assert.Equal("billing-queue", schedule.Destination);
         Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+    }
+
+    [Fact]
+    public async Task Dispatcher_DispatchesPersistedSagaTimeoutScheduleWithStoredHeaders()
+    {
+        var sender = new RecordingSender();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(15);
+        var dispatcher = CreateDispatcher(sender, routes =>
+            routes.MapScheduledMessage<TestTimeout>("saga-timeouts"));
+        var operation = new MiniBusOutboxStoredOperation(
+            Guid.NewGuid(),
+            "stored-timeout-message-1",
+            MiniBusOutboxOperationKind.Schedule,
+            BinaryData.FromString("{\"correlationId\":\"saga-1\"}"),
+            typeof(TestTimeout),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [MiniBusHeaderNames.MessageId] = "original-outbox-message",
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+                [MiniBusHeaderNames.CausationId] = "incoming-message-1"
+            },
+            dueTime,
+            AttemptCount: 1);
+
+        await dispatcher.DispatchAsync(operation);
+
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("saga-timeouts", schedule.Destination);
+        Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+        Assert.Equal("{\"correlationId\":\"saga-1\"}", schedule.Message.Body.ToString());
+        Assert.Equal("stored-timeout-message-1", schedule.Message.MessageId);
+        Assert.Equal("stored-timeout-message-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.MessageId]);
+        Assert.Equal("correlation-1", schedule.Message.CorrelationId);
+        Assert.Equal("incoming-message-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.CausationId]);
+        Assert.Equal(typeof(TestTimeout).AssemblyQualifiedName, schedule.Message.Subject);
     }
 
     [Fact]
@@ -374,6 +427,8 @@ public sealed class AzureServiceBusTransportTests
     private sealed record TestCommand(Guid Id) : ICommand;
 
     private sealed record TestEvent(Guid Id) : IEvent;
+
+    private sealed record TestTimeout(string CorrelationId) : ISagaTimeout;
 
     private sealed class RecordingSender : IAzureServiceBusSender
     {

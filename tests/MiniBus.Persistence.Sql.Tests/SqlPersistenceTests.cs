@@ -181,6 +181,41 @@ public sealed class SqlPersistenceTests
     }
 
     [Fact]
+    public void OutboxOperationSerializer_PreservesSagaTimeoutSchedule()
+    {
+        var serializer = new SqlOutboxOperationSerializer(new RecordingSerializer());
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(5);
+        var operation = new MiniBusOutboxOperation(
+            MiniBusOutboxOperationKind.Schedule,
+            new TestTimeout("saga-1"),
+            typeof(TestTimeout),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+                [MiniBusHeaderNames.CausationId] = "message-1"
+            },
+            dueTime);
+
+        var serialized = serializer.Serialize(operation);
+        var stored = serializer.Deserialize(
+            Guid.NewGuid(),
+            "outgoing-timeout-1",
+            serialized.OperationKind,
+            serialized.MessageType,
+            serialized.Body,
+            serialized.HeadersJson,
+            serialized.DueTime,
+            attemptCount: 1);
+
+        Assert.Equal(MiniBusOutboxOperationKind.Schedule, stored.Kind);
+        Assert.Equal(typeof(TestTimeout), stored.MessageType);
+        Assert.Equal("serialized:TestTimeout", stored.Body.ToString());
+        Assert.Equal("correlation-1", stored.Headers[MiniBusHeaderNames.CorrelationId]);
+        Assert.Equal("message-1", stored.Headers[MiniBusHeaderNames.CausationId]);
+        Assert.Equal(dueTime, stored.DueTime);
+    }
+
+    [Fact]
     public async Task OutboxDispatcher_MarksSuccessfulDispatch()
     {
         var operation = CreateStoredOperation();
@@ -285,6 +320,8 @@ public sealed class SqlPersistenceTests
     }
 
     private sealed record TestCommand(Guid Id) : ICommand;
+
+    private sealed record TestTimeout(string CorrelationId) : ISagaTimeout;
 
     private sealed class CustomSagaPersistence : ISagaPersistence
     {

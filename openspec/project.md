@@ -1250,11 +1250,11 @@ Basic saga contracts, correlation, invocation, in-memory persistence, and SQL pe
 - [x] Implement SQL saga persistence.
 - [x] Implement durable optimistic concurrency using SQL version metadata.
 - [x] Ensure saga persistence failures and concurrency conflicts flow through recoverability.
-- [ ] Add saga timeout scheduling APIs or conventions.
-- [ ] Decide whether saga timeouts use Service Bus scheduled messages only or an optional SQL timeout table.
+- [x] Add saga timeout scheduling APIs or conventions.
+- [x] Decide whether saga timeouts use Service Bus scheduled messages only or an optional SQL timeout table.
 - [ ] Implement optional SQL timeout table and dispatcher if durable SQL-managed timeouts are desired.
 - [x] Add integration tests for SQL saga load/create/save/complete and concurrency conflicts.
-- [ ] Add integration tests for saga timeout dispatch.
+- [x] Add integration tests for saga timeout dispatch.
 
 ### 24.4 Azure Storage support
 
