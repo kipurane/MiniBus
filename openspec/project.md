@@ -1261,7 +1261,7 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 - [x] Implement Blob payload store.
 - [x] Implement large payload/DataBus/claim-check support.
 - [x] Add receive-side claim-check resolution before deserialization.
-- [ ] Implement audit blob writer.
+- [x] Implement audit blob writer.
 - [x] Add Testcontainers-backed Azurite or live-resource-gated integration tests for Blob payload storage.
 
 ### 24.5 Observability

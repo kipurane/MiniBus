@@ -1,7 +1,9 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.DependencyInjection;
 using MiniBus.AzureFunctions.Processing.Pipeline;
 using MiniBus.AzureFunctions.Settlement;
+using MiniBus.Core.Auditing;
 using MiniBus.Core.Handlers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
@@ -17,6 +19,7 @@ public sealed class MiniBusProcessor
     private static readonly ReceivedMessageHeadersBehavior ReceivedMessageHeadersBehavior = new();
 
     private readonly MiniBusProcessorOptions _options;
+    private readonly IServiceProvider _serviceProvider;
     private readonly RecoverabilityDecisionMaker _recoverabilityDecisionMaker;
     private readonly MiniBusProcessingPipeline _pipeline;
     private readonly DelayedRetryScheduler _delayedRetryScheduler;
@@ -34,6 +37,7 @@ public sealed class MiniBusProcessor
         ArgumentNullException.ThrowIfNull(serviceProvider);
 
         _options = options ?? new MiniBusProcessorOptions();
+        _serviceProvider = serviceProvider;
         _recoverabilityDecisionMaker = recoverabilityDecisionMaker ?? new RecoverabilityDecisionMaker();
         _pipeline = CreatePipeline(serializer, handlerInvoker, serviceProvider, sagaInvoker);
         _delayedRetryScheduler = new DelayedRetryScheduler(serviceProvider);
@@ -45,7 +49,7 @@ public sealed class MiniBusProcessor
     {
         ArgumentNullException.ThrowIfNull(message);
         var context = new MiniBusProcessingContext(message, _options);
-        return _pipeline.InvokeAsync(context, cancellationToken);
+        return ProcessWithoutSettlementAsync(context, cancellationToken);
     }
 
     public Task ProcessAsync(
@@ -78,10 +82,18 @@ public sealed class MiniBusProcessor
                 await _pipeline.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
 
                 context.SettlementDecision = MiniBusSettlementDecision.Complete();
+                await AuditAsync(
+                        context,
+                        context.IsShortCircuited
+                            ? MiniBusAuditProcessingOutcome.SkippedDuplicate
+                            : MiniBusAuditProcessingOutcome.Completed,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 await ApplySettlementAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
             catch (Exception exception) when (exception is not MiniBusPersistenceCommitException
+                                             && exception is not MiniBusAuditWriteException
                                              && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
             {
                 var decision = _recoverabilityDecisionMaker.Decide(
@@ -107,12 +119,24 @@ public sealed class MiniBusProcessor
                         await _delayedRetryScheduler.ScheduleAsync(context, decision, cancellationToken)
                             .ConfigureAwait(false);
                         context.SettlementDecision = MiniBusSettlementDecision.Complete();
+                        await AuditAsync(
+                                context,
+                                MiniBusAuditProcessingOutcome.DelayedRetryScheduled,
+                                cancellationToken)
+                            .ConfigureAwait(false);
                         await ApplySettlementAsync(context, cancellationToken).ConfigureAwait(false);
                         return;
                     case RecoverabilityDecisionKind.DeadLetter:
                         context.SettlementDecision = MiniBusSettlementDecision.DeadLetter(
                             decision.DeadLetterReason ?? RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason,
                             decision.DeadLetterDescription);
+                        await AuditAsync(
+                                context,
+                                MiniBusAuditProcessingOutcome.DeadLettered,
+                                cancellationToken,
+                                context.SettlementDecision.DeadLetterReason,
+                                context.SettlementDecision.DeadLetterDescription)
+                            .ConfigureAwait(false);
                         await ApplySettlementAsync(context, cancellationToken).ConfigureAwait(false);
                         return;
                     case RecoverabilityDecisionKind.Propagate:
@@ -121,6 +145,20 @@ public sealed class MiniBusProcessor
                 }
             }
         }
+    }
+
+    private async Task ProcessWithoutSettlementAsync(
+        MiniBusProcessingContext context,
+        CancellationToken cancellationToken)
+    {
+        await _pipeline.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+        await AuditAsync(
+                context,
+                context.IsShortCircuited
+                    ? MiniBusAuditProcessingOutcome.SkippedDuplicate
+                    : MiniBusAuditProcessingOutcome.Completed,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static MiniBusProcessingPipeline CreatePipeline(
@@ -169,6 +207,38 @@ public sealed class MiniBusProcessor
             case MiniBusSettlementDecisionKind.DelayedRetry:
             default:
                 return;
+        }
+    }
+
+    private async Task AuditAsync(
+        MiniBusProcessingContext context,
+        MiniBusAuditProcessingOutcome outcome,
+        CancellationToken cancellationToken,
+        string? deadLetterReason = null,
+        string? deadLetterDescription = null)
+    {
+        var auditWriter = _serviceProvider.GetService<IMiniBusAuditWriter>();
+        if (auditWriter is null)
+        {
+            return;
+        }
+
+        try
+        {
+            context.Options.Audit.Validate();
+            var record = MiniBusAuditRecordFactory.Create(
+                context,
+                outcome,
+                context.Options.Audit.AuditIdFactory(),
+                context.Options.Audit.UtcNowProvider(),
+                deadLetterReason,
+                deadLetterDescription);
+
+            await auditWriter.WriteAsync(record, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            throw new MiniBusAuditWriteException("MiniBus audit write failed.", exception);
         }
     }
 }

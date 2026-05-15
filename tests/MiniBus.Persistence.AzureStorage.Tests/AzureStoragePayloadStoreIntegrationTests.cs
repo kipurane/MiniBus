@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using Azure.Storage.Blobs;
+using MiniBus.Core.Auditing;
 using Testcontainers.Azurite;
 using Xunit;
 
@@ -143,6 +144,36 @@ public sealed class AzureStoragePayloadStoreIntegrationTests :
         Assert.Equal(8, reference.Length);
     }
 
+    [AzureStorageFact]
+    public async Task AuditWriter_WritesAuditEnvelopeAndMetadata()
+    {
+        var auditedUtc = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var writer = await _fixture.CreateAuditWriterAsync(options =>
+        {
+            options.UtcNowProvider = () => auditedUtc;
+            options.AuditRetention = TimeSpan.FromHours(2);
+            options.AuditBlobNamePrefix = "custom-audits";
+        });
+        var record = MiniBusAuditRecordTestData.Create(
+            body: BinaryData.FromString("{}"),
+            auditedUtc: auditedUtc,
+            causationId: null);
+
+        await writer.WriteAsync(record);
+
+        var blobClient = _fixture.CreateAuditBlobClient(
+            BlobMiniBusAuditWriter.CreateBlobName("custom-audits", auditedUtc, "audit-1"));
+        var content = await blobClient.DownloadContentAsync();
+        var properties = await blobClient.GetPropertiesAsync();
+
+        Assert.Contains("\"messageId\":\"message-1\"", content.Value.Content.ToString(), StringComparison.Ordinal);
+        Assert.Equal("audit-1", properties.Value.Metadata["minibus_audit_id"]);
+        Assert.Equal("message-1", properties.Value.Metadata["minibus_message_id"]);
+        Assert.Equal("Billing", properties.Value.Metadata["minibus_endpoint"]);
+        Assert.Equal("Completed", properties.Value.Metadata["minibus_outcome"]);
+        Assert.Equal(auditedUtc.AddHours(2).ToString("O"), properties.Value.Metadata["minibus_expires_utc"]);
+    }
+
     public sealed class AzureStorageFixture : IAsyncLifetime
     {
         private readonly string? _externalConnectionString;
@@ -213,10 +244,45 @@ public sealed class AzureStoragePayloadStoreIntegrationTests :
             return store;
         }
 
+        internal async Task<BlobMiniBusAuditWriter> CreateAuditWriterAsync(
+            Action<MiniBusAzureStoragePersistenceOptions>? configureOptions = null)
+        {
+            if (_startupException is not null)
+            {
+                throw new InvalidOperationException(
+                    "Azurite Testcontainers startup failed. " +
+                    $"Alternatively set {ConnectionStringEnvironmentVariable}. " +
+                    $"Original error: {_startupException.Message}");
+            }
+
+            var connectionString = GetConnectionString();
+            var options = new MiniBusAzureStoragePersistenceOptions
+            {
+                ConnectionString = connectionString,
+                AuditContainerName = ContainerName,
+                AuditBlobContainerClientFactory = () => new BlobContainerClient(
+                    connectionString,
+                    ContainerName,
+                    CreateBlobClientOptions())
+            };
+            configureOptions?.Invoke(options);
+            MiniBusAzureStoragePersistenceOptionsValidator.ValidateAudit(options);
+
+            var containerClient = new BlobContainerClient(connectionString, ContainerName, CreateBlobClientOptions());
+            await containerClient.CreateIfNotExistsAsync();
+            return new BlobMiniBusAuditWriter(options);
+        }
+
         internal BlobClient CreateBlobClient(MiniBusPayloadReference reference)
         {
             return new BlobContainerClient(GetConnectionString(), reference.ContainerName, CreateBlobClientOptions())
                 .GetBlobClient(reference.BlobName);
+        }
+
+        internal BlobClient CreateAuditBlobClient(string blobName)
+        {
+            return new BlobContainerClient(GetConnectionString(), ContainerName, CreateBlobClientOptions())
+                .GetBlobClient(blobName);
         }
 
         private static BlobClientOptions CreateBlobClientOptions()
@@ -298,4 +364,5 @@ public sealed class AzureStoragePayloadStoreIntegrationTests :
 
         public override bool CanSeek => false;
     }
+
 }

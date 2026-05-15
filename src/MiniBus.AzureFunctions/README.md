@@ -143,8 +143,25 @@ services.AddMiniBusAzureStoragePersistence(
 
 Claim-check behavior is opt-in. Messages whose serialized body is at or below the threshold stay inline. Messages above the threshold are written through the configured Blob payload store, sent with MiniBus claim-check headers, and resolved by `MiniBusProcessor` before deserialization so handlers and sagas still receive the original message contract.
 
-Use the options overload to provide a custom `BlobContainerClient` factory when an application owns Azure SDK client configuration. The payload store returns MiniBus-owned references and keeps Azure SDK types out of handlers, message contracts, saga data, and handler-facing APIs.
+Use the options overload to provide a custom `BlobContainerClient` factory when an application owns Azure SDK client configuration. With the default MiniBus registrations, that delegate is evaluated when the singleton payload store or audit writer is constructed, so the resulting `BlobContainerClient` is normally reused for the lifetime of the service provider rather than recreated for each payload or audit operation. Callers can return a new client if they need custom ownership semantics, but reusing a cached `BlobContainerClient` is usually the better choice when sharing Azure SDK configuration and connection pools across components. The payload store returns MiniBus-owned references and keeps Azure SDK types out of handlers, message contracts, saga data, and handler-facing APIs.
 
 Configure Blob payload retention to exceed the longest expected processing window, including delayed retries, scheduled delivery, and SQL outbox replay. Disabling claim-check stops new outgoing messages from using Blob payload storage, but already queued claim-check messages still require receive-side payload resolution until they are processed or dead-lettered.
+
+## Azure Storage audit blobs
+
+Blob-backed audit writing is opt-in and records processed inbound messages before final completion or dead-letter settlement. Audit records include message identity, correlation metadata, headers, outcome, retry/dead-letter metadata, and inline body or claim-check reference context while keeping handlers independent from Azure SDK types.
+
+```csharp
+services.AddMiniBusAzureBlobAudit(
+    connectionString,
+    auditContainerName: "minibus-audits",
+    options =>
+    {
+        options.AuditBlobNamePrefix = "audits";
+        options.AuditRetention = TimeSpan.FromDays(30);
+    });
+```
+
+Audit write failures are fail-closed: if auditing is enabled and the audit blob cannot be written, MiniBus treats that as a processing failure and does not complete or dead-letter the received message as if auditing had succeeded. Claim-checked messages audit claim-check metadata by default rather than duplicating large resolved payload bytes.
 
 `MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same tests against a live Azure Storage account.

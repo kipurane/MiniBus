@@ -12,4 +12,6 @@ public sealed class MiniBusProcessorOptions
     public MiniBusPersistenceOptions Persistence { get; } = new();
 
     public MiniBusRecoverabilityOptions Recoverability { get; } = new();
+
+    public MiniBusAuditOptions Audit { get; } = new();
 }

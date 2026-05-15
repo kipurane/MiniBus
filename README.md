@@ -128,9 +128,9 @@ Run the SQL persistence tests:
 dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj
 ```
 
-## Azure Storage payload persistence
+## Azure Storage payload persistence and audit blobs
 
-Azure Storage payload persistence is opt-in through `MiniBus.Persistence.AzureStorage`. The first supported storage primitive is a Blob-backed payload store for opaque payload bytes; full claim-check/DataBus message processing is planned separately.
+Azure Storage persistence is opt-in through `MiniBus.Persistence.AzureStorage`. It provides Blob-backed payload storage for opaque payload bytes, claim-check/DataBus storage for large messages, and optional Blob-backed audit writing for processed inbound messages.
 
 ```csharp
 services.AddMiniBusAzureStoragePersistence(
@@ -143,7 +143,22 @@ services.AddMiniBusAzureStoragePersistence(
     });
 ```
 
-Applications can also register a caller-provided `BlobContainerClient` factory when they need custom Azure SDK client ownership. The payload store returns MiniBus-owned payload references containing container name, blob name, payload id, length, content type, creation timestamp, and optional expiry timestamp; handlers and message contracts do not need to reference Azure SDK types.
+Applications can also register a caller-provided `BlobContainerClient` factory when they need custom Azure SDK client ownership. With the default MiniBus registrations, that delegate is evaluated when the singleton payload store or audit writer is constructed, so the resulting `BlobContainerClient` is normally reused for the lifetime of the service provider rather than recreated on every payload or audit operation. Callers can return a new client if they need custom ownership semantics, but reusing a cached `BlobContainerClient` is usually the better choice when sharing Azure SDK configuration and connection pools across components. The payload store returns MiniBus-owned payload references containing container name, blob name, payload id, length, content type, creation timestamp, and optional expiry timestamp; handlers and message contracts do not need to reference Azure SDK types.
+
+Blob-backed audit writing is registered separately so applications can opt in without changing handler code:
+
+```csharp
+services.AddMiniBusAzureBlobAudit(
+    connectionString,
+    auditContainerName: "minibus-audits",
+    options =>
+    {
+        options.AuditBlobNamePrefix = "audits";
+        options.AuditRetention = TimeSpan.FromDays(30);
+    });
+```
+
+Audit records are written before final completion or dead-letter settlement and include message identity, correlation metadata, headers, outcome, retry/dead-letter metadata, and inline body or claim-check reference context. Audit write failures are treated as processing failures when auditing is enabled, so MiniBus does not silently complete a message that was expected to be audited.
 
 `MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same integration coverage against an external Azure Storage account instead of starting Azurite. If neither Docker nor a live connection string is available, those integration tests skip with a clear reason.
 

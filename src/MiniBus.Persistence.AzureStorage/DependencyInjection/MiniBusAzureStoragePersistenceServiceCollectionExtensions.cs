@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using MiniBus.Core.Auditing;
 using MiniBus.Core.ClaimCheck;
 
 namespace MiniBus.Persistence.AzureStorage.DependencyInjection;
@@ -68,6 +69,49 @@ public static class MiniBusAzureStoragePersistenceServiceCollectionExtensions
         options.Validate();
 
         services.AddSingleton(options);
+        return services;
+    }
+
+    public static IServiceCollection AddMiniBusAzureBlobAudit(
+        this IServiceCollection services,
+        string connectionString,
+        string auditContainerName,
+        Action<MiniBusAzureStoragePersistenceOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Azure Storage connection string cannot be empty.", nameof(connectionString));
+        }
+
+        if (string.IsNullOrWhiteSpace(auditContainerName))
+        {
+            throw new ArgumentException("Azure Storage audit container name cannot be empty.", nameof(auditContainerName));
+        }
+
+        return services.AddMiniBusAzureBlobAudit(options =>
+        {
+            options.ConnectionString = connectionString;
+            options.AuditContainerName = auditContainerName;
+            configureOptions?.Invoke(options);
+        });
+    }
+
+    public static IServiceCollection AddMiniBusAzureBlobAudit(
+        this IServiceCollection services,
+        Action<MiniBusAzureStoragePersistenceOptions> configureOptions)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureOptions);
+
+        var options = new MiniBusAzureStoragePersistenceOptions();
+        configureOptions(options);
+        MiniBusAzureStoragePersistenceOptionsValidator.ApplyConnectionStringFactory(options);
+        MiniBusAzureStoragePersistenceOptionsValidator.ValidateAudit(options);
+
+        services.AddSingleton<IMiniBusAuditWriter>(_ => new BlobMiniBusAuditWriter(options));
+
         return services;
     }
 }
