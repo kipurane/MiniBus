@@ -13,11 +13,14 @@ internal sealed class MiniBusProcessingContext
         IMiniBusMessageActions? actions = null)
     {
         Message = message;
+        Body = message.Body;
         Options = options;
         Actions = actions;
     }
 
     public ServiceBusReceivedMessage Message { get; }
+
+    public BinaryData Body { get; set; }
 
     public MiniBusProcessorOptions Options { get; }
 

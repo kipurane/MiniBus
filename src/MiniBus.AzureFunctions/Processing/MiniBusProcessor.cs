@@ -134,6 +134,7 @@ public sealed class MiniBusProcessor
             new ReceivedMessageHeadersBehavior(),
             new PersistenceBehavior(serviceProvider),
             new MessageTypeResolutionBehavior(),
+            new ClaimCheckPayloadResolutionBehavior(serviceProvider),
             new MessageDeserializationBehavior(serializer),
             new HandlerContextBehavior(serviceProvider),
             new HandlerInvocationBehavior(handlerInvoker, serviceProvider),

@@ -1,4 +1,5 @@
 using Azure.Storage.Blobs;
+using MiniBus.Core.ClaimCheck;
 using Microsoft.Extensions.DependencyInjection;
 using MiniBus.Persistence.AzureStorage.DependencyInjection;
 using Xunit;
@@ -62,6 +63,24 @@ public sealed class AzureStoragePayloadStoreTests
         using var provider = services.BuildServiceProvider();
 
         Assert.IsType<BlobMiniBusPayloadStore>(provider.GetRequiredService<IMiniBusPayloadStore>());
+        Assert.Same(
+            provider.GetRequiredService<IMiniBusPayloadStore>(),
+            provider.GetRequiredService<IMiniBusClaimCheckPayloadStore>());
+    }
+
+    [Fact]
+    public void AddMiniBusAzureBlobClaimCheck_RegistersEnabledOptions()
+    {
+        var services = new ServiceCollection();
+
+        services.AddMiniBusAzureBlobClaimCheck(1024);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<MiniBusClaimCheckOptions>();
+
+        Assert.True(options.Enabled);
+        Assert.Equal(1024, options.PayloadThresholdBytes);
+        Assert.Equal(MiniBusClaimCheckProviderNames.AzureBlobStorage, options.Provider);
     }
 
     [Fact]

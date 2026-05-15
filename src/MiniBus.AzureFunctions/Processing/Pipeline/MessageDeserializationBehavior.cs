@@ -21,7 +21,7 @@ internal sealed class MessageDeserializationBehavior : IMiniBusProcessingBehavio
             throw new InvalidOperationException("MiniBus message type must be resolved before deserialization.");
         }
 
-        context.DeserializedMessage = _serializer.Deserialize(context.Message.Body, context.MessageType);
+        context.DeserializedMessage = _serializer.Deserialize(context.Body, context.MessageType);
         return next(context, cancellationToken);
     }
 }

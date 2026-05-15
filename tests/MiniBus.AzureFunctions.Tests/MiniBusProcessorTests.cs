@@ -7,6 +7,7 @@ using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
+using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Handlers;
@@ -185,6 +186,80 @@ public sealed class MiniBusProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_ResolvesClaimCheckBeforeDeserialization()
+    {
+        var recorder = new HandlerRecorder();
+        var serializer = new RecordingSerializer(new TestCommand(Guid.NewGuid()));
+        var store = new RecordingClaimCheckPayloadStore
+        {
+            Payload = BinaryData.FromString("{\"id\":\"restored\"}")
+        };
+        var processor = CreateProcessor(serializer, services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusClaimCheckPayloadStore>(store);
+        });
+        var message = CreateMessage(CreateClaimCheckProperties("message-1", "correlation-1"));
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Equal("{\"id\":\"restored\"}", serializer.DeserializedBody?.ToString());
+        Assert.Single(store.Reads);
+        Assert.Single(recorder.Invocations);
+        Assert.Equal("message-1", recorder.Invocations[0].Context.MessageId);
+        Assert.Equal("correlation-1", recorder.Invocations[0].Context.CorrelationId);
+        Assert.Equal(bool.TrueString, recorder.Invocations[0].Context.Headers[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DeadLettersWhenClaimCheckPayloadIsMissing()
+    {
+        var recorder = new HandlerRecorder();
+        var store = new RecordingClaimCheckPayloadStore
+        {
+            Exception = new MiniBusClaimCheckPayloadNotFoundException(CreateClaimCheckReference())
+        };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusClaimCheckPayloadStore>(store);
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(CreateMessage(CreateClaimCheckProperties()), actions);
+
+        Assert.Empty(recorder.Invocations);
+        Assert.NotNull(actions.DeadLetteredMessage);
+        Assert.Contains("claim-check payload", actions.DeadLetterDescription, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DeadLettersWhenClaimCheckMetadataIsInvalid()
+    {
+        var recorder = new HandlerRecorder();
+        var properties = CreateClaimCheckProperties();
+        properties.Remove(MiniBusClaimCheckHeaderNames.BlobName);
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusClaimCheckPayloadStore>(new RecordingClaimCheckPayloadStore());
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(CreateMessage(properties), actions);
+
+        Assert.Empty(recorder.Invocations);
+        Assert.NotNull(actions.DeadLetteredMessage);
+        Assert.Contains(MiniBusClaimCheckHeaderNames.BlobName, actions.DeadLetterDescription, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ProcessAsync_DeadLettersWhenHandlerFails()
     {
         var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
@@ -301,6 +376,47 @@ public sealed class MiniBusProcessorTests
         Assert.Equal("0", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ImmediateAttempt]);
         Assert.Equal("1", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
         Assert.Equal("handler failed", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.ExceptionMessage]);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DelayedRetryPreservesClaimCheckBodyAndMetadata()
+    {
+        var recorder = new HandlerRecorder();
+        var sender = new RecordingSender();
+        var delayedRetryDelay = TimeSpan.FromSeconds(10);
+        var store = new RecordingClaimCheckPayloadStore
+        {
+            Payload = BinaryData.FromString("{\"id\":\"restored\"}")
+        };
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+                services.AddSingleton<IMiniBusClaimCheckPayloadStore>(store);
+                RegisterTransport(services, sender, routes => routes.MapCommand<TestCommand>("billing-queue"));
+            },
+            options =>
+            {
+                options.Recoverability.ImmediateRetries = 0;
+                options.Recoverability.DelayedRetries.Add(delayedRetryDelay);
+            });
+        var message = ServiceBusModelFactory.ServiceBusReceivedMessage(
+            body: BinaryData.FromString("{\"claimCheck\":true}"),
+            messageId: "sdk-message-id",
+            correlationId: "sdk-correlation-id",
+            properties: CreateClaimCheckProperties("message-1", "correlation-1"));
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("{\"claimCheck\":true}", schedule.Message.Body.ToString());
+        Assert.Equal(bool.TrueString, schedule.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Equal("payloads/payload-1.bin", schedule.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.BlobName]);
+        Assert.Equal("1", schedule.Message.ApplicationProperties[MiniBusRecoverabilityHeaderNames.DelayedAttempt]);
+        Assert.Same(message, actions.CompletedMessage);
     }
 
     [Fact]
@@ -682,6 +798,39 @@ public sealed class MiniBusProcessorTests
             properties: properties);
     }
 
+    private static Dictionary<string, object> CreateClaimCheckProperties(
+        string messageId = "message-1",
+        string correlationId = "correlation-1")
+    {
+        return new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = messageId,
+            [MiniBusHeaderNames.CorrelationId] = correlationId,
+            [MiniBusClaimCheckHeaderNames.Enabled] = bool.TrueString,
+            [MiniBusClaimCheckHeaderNames.Provider] = MiniBusClaimCheckProviderNames.AzureBlobStorage,
+            [MiniBusClaimCheckHeaderNames.ContainerName] = "minibus-payloads",
+            [MiniBusClaimCheckHeaderNames.BlobName] = "payloads/payload-1.bin",
+            [MiniBusClaimCheckHeaderNames.PayloadId] = "payload-1",
+            [MiniBusClaimCheckHeaderNames.PayloadLength] = "128",
+            [MiniBusClaimCheckHeaderNames.ContentType] = "application/json",
+            [MiniBusClaimCheckHeaderNames.CreatedUtc] = "2026-05-15T12:00:00.0000000+00:00"
+        };
+    }
+
+    private static MiniBusClaimCheckPayloadReference CreateClaimCheckReference()
+    {
+        return new MiniBusClaimCheckPayloadReference(
+            MiniBusClaimCheckProviderNames.AzureBlobStorage,
+            "minibus-payloads",
+            "payloads/payload-1.bin",
+            "payload-1",
+            128,
+            "application/json",
+            new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero),
+            null);
+    }
+
     private sealed record TestCommand(Guid Id) : ICommand;
 
     private sealed record OutgoingCommand(Guid Id) : ICommand;
@@ -862,6 +1011,8 @@ public sealed class MiniBusProcessorTests
 
         public Type? DeserializedType { get; private set; }
 
+        public BinaryData? DeserializedBody { get; private set; }
+
         public BinaryData Serialize(object message, Type messageType)
         {
             return BinaryData.FromString($"serialized:{messageType.Name}");
@@ -870,7 +1021,39 @@ public sealed class MiniBusProcessorTests
         public object Deserialize(BinaryData body, Type messageType)
         {
             DeserializedType = messageType;
+            DeserializedBody = body;
             return _message;
+        }
+    }
+
+    private sealed class RecordingClaimCheckPayloadStore : IMiniBusClaimCheckPayloadStore
+    {
+        public BinaryData Payload { get; set; } = BinaryData.FromString("{}");
+
+        public Exception? Exception { get; init; }
+
+        public List<MiniBusClaimCheckPayloadReference> Reads { get; } = new();
+
+        public Task<MiniBusClaimCheckPayloadReference> WriteAsync(
+            BinaryData payload,
+            MiniBusClaimCheckPayloadWriteOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<BinaryData> ReadAsync(
+            MiniBusClaimCheckPayloadReference reference,
+            CancellationToken cancellationToken = default)
+        {
+            Reads.Add(reference);
+
+            if (Exception is not null)
+            {
+                return Task.FromException<BinaryData>(Exception);
+            }
+
+            return Task.FromResult(Payload);
         }
     }
 

@@ -3,6 +3,7 @@ using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
+using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
@@ -140,6 +141,71 @@ public sealed class AzureServiceBusTransportTests
     }
 
     [Fact]
+    public async Task Dispatcher_SendsLargeCommandAsClaimCheck()
+    {
+        var sender = new RecordingSender();
+        var store = new RecordingPayloadStore();
+        var dispatcher = CreateDispatcher(
+            sender,
+            routes => routes.MapCommand<TestCommand>("billing-queue"),
+            claimCheckOptions: new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
+            payloadStore: store);
+
+        await dispatcher.SendAsync(new TestCommand(Guid.NewGuid()));
+
+        var send = Assert.Single(sender.Sends);
+        Assert.Equal("billing-queue", send.Destination);
+        Assert.Equal("serialized:TestCommand", Assert.Single(store.Writes).Payload.ToString());
+        Assert.NotEqual("serialized:TestCommand", send.Message.Body.ToString());
+        Assert.Equal(bool.TrueString, send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Equal(MiniBusClaimCheckProviderNames.AzureBlobStorage, send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Provider]);
+        Assert.Equal("minibus-payloads", send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.ContainerName]);
+        Assert.Equal("payloads/payload-1.bin", send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.BlobName]);
+        Assert.Equal(typeof(TestCommand).AssemblyQualifiedName, send.Message.Subject);
+        Assert.Equal("application/json", send.Message.ContentType);
+    }
+
+    [Fact]
+    public async Task Dispatcher_PublishesLargeEventAsClaimCheck()
+    {
+        var sender = new RecordingSender();
+        var store = new RecordingPayloadStore();
+        var dispatcher = CreateDispatcher(
+            sender,
+            routes => routes.MapEvent<TestEvent>("domain-events"),
+            claimCheckOptions: new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
+            payloadStore: store);
+
+        await dispatcher.PublishAsync(new TestEvent(Guid.NewGuid()));
+
+        var send = Assert.Single(sender.Sends);
+        Assert.Equal("domain-events", send.Destination);
+        Assert.Equal("serialized:TestEvent", Assert.Single(store.Writes).Payload.ToString());
+        Assert.Equal(bool.TrueString, send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Enabled]);
+    }
+
+    [Fact]
+    public async Task Dispatcher_SchedulesLargeMessageAsClaimCheck()
+    {
+        var sender = new RecordingSender();
+        var store = new RecordingPayloadStore();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(10);
+        var dispatcher = CreateDispatcher(
+            sender,
+            routes => routes.MapCommand<TestCommand>("billing-queue"),
+            claimCheckOptions: new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
+            payloadStore: store);
+
+        await dispatcher.ScheduleAsync(new TestCommand(Guid.NewGuid()), dueTime);
+
+        var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("billing-queue", schedule.Destination);
+        Assert.Equal(dueTime, schedule.ScheduledEnqueueTime);
+        Assert.Equal("serialized:TestCommand", Assert.Single(store.Writes).Payload.ToString());
+        Assert.Equal(bool.TrueString, schedule.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Enabled]);
+    }
+
+    [Fact]
     public async Task Dispatcher_SchedulesSagaTimeoutToExplicitScheduledDestination()
     {
         var sender = new RecordingSender();
@@ -245,6 +311,40 @@ public sealed class AzureServiceBusTransportTests
         Assert.Equal("correlation-1", schedule.Message.CorrelationId);
         Assert.Equal("incoming-message-1", schedule.Message.ApplicationProperties[MiniBusHeaderNames.CausationId]);
         Assert.Equal(typeof(TestTimeout).AssemblyQualifiedName, schedule.Message.Subject);
+    }
+
+    [Fact]
+    public async Task Dispatcher_DispatchesPersistedClaimCheckOperationWithStoredBodyAndHeaders()
+    {
+        var sender = new RecordingSender();
+        var dispatcher = CreateDispatcher(sender, routes =>
+            routes.MapCommand<TestCommand>("billing-queue"));
+        var operation = new MiniBusOutboxStoredOperation(
+            Guid.NewGuid(),
+            "stored-outgoing-message-1",
+            MiniBusOutboxOperationKind.Send,
+            BinaryData.FromString("{\"provider\":\"azure-blob-storage\"}"),
+            typeof(TestCommand),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [MiniBusClaimCheckHeaderNames.Enabled] = bool.TrueString,
+                [MiniBusClaimCheckHeaderNames.Provider] = MiniBusClaimCheckProviderNames.AzureBlobStorage,
+                [MiniBusClaimCheckHeaderNames.ContainerName] = "minibus-payloads",
+                [MiniBusClaimCheckHeaderNames.BlobName] = "payloads/payload-1.bin",
+                [MiniBusClaimCheckHeaderNames.PayloadId] = "payload-1",
+                [MiniBusClaimCheckHeaderNames.PayloadLength] = "128",
+                [MiniBusClaimCheckHeaderNames.CreatedUtc] = "2026-05-15T12:00:00.0000000+00:00"
+            },
+            DueTime: null,
+            AttemptCount: 1);
+
+        await dispatcher.DispatchAsync(operation);
+
+        var send = Assert.Single(sender.Sends);
+        Assert.Equal("{\"provider\":\"azure-blob-storage\"}", send.Message.Body.ToString());
+        Assert.Equal("stored-outgoing-message-1", send.Message.MessageId);
+        Assert.Equal(bool.TrueString, send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Equal("payloads/payload-1.bin", send.Message.ApplicationProperties[MiniBusClaimCheckHeaderNames.BlobName]);
     }
 
     [Fact]
@@ -411,14 +511,16 @@ public sealed class AzureServiceBusTransportTests
 
     private static AzureServiceBusTransportDispatcher CreateDispatcher(
         RecordingSender sender,
-        Action<AzureServiceBusTransportRoutes>? configureRoutes = null)
+        Action<AzureServiceBusTransportRoutes>? configureRoutes = null,
+        MiniBusClaimCheckOptions? claimCheckOptions = null,
+        IMiniBusClaimCheckPayloadStore? payloadStore = null)
     {
         var routes = new AzureServiceBusTransportRoutes();
         configureRoutes?.Invoke(routes);
 
         return new AzureServiceBusTransportDispatcher(
             routes,
-            new AzureServiceBusMessageFactory(new RecordingSerializer()),
+            new AzureServiceBusMessageFactory(new RecordingSerializer(), claimCheckOptions, payloadStore),
             sender);
     }
 
@@ -467,6 +569,35 @@ public sealed class AzureServiceBusTransportTests
         }
 
         public object Deserialize(BinaryData body, Type messageType)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    private sealed class RecordingPayloadStore : IMiniBusClaimCheckPayloadStore
+    {
+        public List<(BinaryData Payload, MiniBusClaimCheckPayloadWriteOptions? Options)> Writes { get; } = new();
+
+        public Task<MiniBusClaimCheckPayloadReference> WriteAsync(
+            BinaryData payload,
+            MiniBusClaimCheckPayloadWriteOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add((payload, options));
+            return Task.FromResult(new MiniBusClaimCheckPayloadReference(
+                MiniBusClaimCheckProviderNames.AzureBlobStorage,
+                "minibus-payloads",
+                "payloads/payload-1.bin",
+                "payload-1",
+                payload.ToArray().LongLength,
+                options?.ContentType,
+                new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero),
+                null));
+        }
+
+        public Task<BinaryData> ReadAsync(
+            MiniBusClaimCheckPayloadReference reference,
+            CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }

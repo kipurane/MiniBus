@@ -146,7 +146,9 @@ internal sealed class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
         DbTransaction transaction,
         CancellationToken cancellationToken)
     {
-        var serialized = _operationSerializer.Serialize(operation);
+        var serialized = await _operationSerializer
+            .SerializeAsync(operation, cancellationToken)
+            .ConfigureAwait(false);
         var outgoingMessageId = CreateOutgoingMessageId(inboxMessage, serialized, sequence);
 
         await using var command = _connection.CreateCommand();

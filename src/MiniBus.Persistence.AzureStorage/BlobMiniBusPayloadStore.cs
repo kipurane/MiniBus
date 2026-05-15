@@ -1,10 +1,20 @@
 using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using MiniBus.Core.ClaimCheck;
 
 namespace MiniBus.Persistence.AzureStorage;
 
-public sealed class BlobMiniBusPayloadStore : IMiniBusPayloadStore
+/// <summary>
+/// Stores MiniBus payload bytes in Azure Blob Storage and exposes the same Blob-backed storage through both
+/// the general payload-store API and the provider-neutral claim-check payload-store API.
+/// </summary>
+/// <remarks>
+/// <see cref="IMiniBusPayloadStore"/> is the Azure Storage package API for direct payload-store use.
+/// <see cref="IMiniBusClaimCheckPayloadStore"/> is the MiniBus core API used by claim-check/DataBus processing
+/// so transport and processing components can resolve payloads without referencing Azure SDK types.
+/// </remarks>
+public sealed class BlobMiniBusPayloadStore : IMiniBusPayloadStore, IMiniBusClaimCheckPayloadStore
 {
     private const string PayloadIdMetadataName = "minibus_payload_id";
     private const string CreatedUtcMetadataName = "minibus_created_utc";
@@ -118,6 +128,43 @@ public sealed class BlobMiniBusPayloadStore : IMiniBusPayloadStore
         catch (RequestFailedException exception) when (exception.Status == 404)
         {
             throw new MiniBusPayloadNotFoundException(reference);
+        }
+    }
+
+    async Task<MiniBusClaimCheckPayloadReference> IMiniBusClaimCheckPayloadStore.WriteAsync(
+        BinaryData payload,
+        MiniBusClaimCheckPayloadWriteOptions? options,
+        CancellationToken cancellationToken)
+    {
+        var reference = await WriteAsync(
+                payload,
+                new MiniBusPayloadWriteOptions
+                {
+                    PayloadId = options?.PayloadId,
+                    ContentType = options?.ContentType,
+                    ExpiresUtc = options?.ExpiresUtc
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToClaimCheckReference(reference);
+    }
+
+    async Task<BinaryData> IMiniBusClaimCheckPayloadStore.ReadAsync(
+        MiniBusClaimCheckPayloadReference reference,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ReadAsync(ToStorageReference(reference), cancellationToken).ConfigureAwait(false);
+        }
+        catch (MiniBusPayloadNotFoundException exception)
+        {
+            throw new MiniBusClaimCheckPayloadNotFoundException(reference, exception);
+        }
+        catch (MiniBusInvalidPayloadReferenceException exception)
+        {
+            throw new MiniBusInvalidClaimCheckReferenceException(exception.Message);
         }
     }
 
@@ -238,4 +285,35 @@ public sealed class BlobMiniBusPayloadStore : IMiniBusPayloadStore
     }
 
     private sealed record PreparedPayload(Stream Stream, long Length);
+
+    private static MiniBusClaimCheckPayloadReference ToClaimCheckReference(MiniBusPayloadReference reference)
+    {
+        return new MiniBusClaimCheckPayloadReference(
+            MiniBusClaimCheckProviderNames.AzureBlobStorage,
+            reference.ContainerName,
+            reference.BlobName,
+            reference.PayloadId,
+            reference.Length,
+            reference.ContentType,
+            reference.CreatedUtc,
+            reference.ExpiresUtc);
+    }
+
+    private static MiniBusPayloadReference ToStorageReference(MiniBusClaimCheckPayloadReference reference)
+    {
+        if (!string.Equals(reference.Provider, MiniBusClaimCheckProviderNames.AzureBlobStorage, StringComparison.Ordinal))
+        {
+            throw new MiniBusInvalidClaimCheckReferenceException(
+                $"MiniBus claim-check provider '{reference.Provider}' is not supported by Azure Blob payload storage.");
+        }
+
+        return new MiniBusPayloadReference(
+            reference.ContainerName,
+            reference.BlobName,
+            reference.PayloadId,
+            reference.Length,
+            reference.ContentType,
+            reference.CreatedUtc,
+            reference.ExpiresUtc);
+    }
 }

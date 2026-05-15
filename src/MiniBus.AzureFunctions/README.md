@@ -125,9 +125,9 @@ Outgoing operations are at-least-once. The SQL outbox dispatcher claims a bounde
 
 `MiniBus.Persistence.Sql.Tests` runs SQL Server-backed integration coverage through Testcontainers when Docker is available. The test fixture uses a pinned SQL Server 2022 Linux container image and requests `linux/amd64`, which lets Apple Silicon machines run it through Docker Desktop's amd64 emulation. If Docker is unavailable, those tests skip with a clear reason and the normal unit test run still passes. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` to run the same integration coverage against an external SQL Server/Azure SQL database instead of starting a container.
 
-## Azure Storage payload persistence
+## Azure Storage payload persistence and claim-check
 
-`MiniBus.Persistence.AzureStorage` provides the first Azure Storage persistence primitive: a Blob-backed payload store for opaque payload bytes. This is foundation work for future claim-check/DataBus behavior; it does not yet alter `Send`, `Publish`, `Schedule`, or receive-side deserialization.
+`MiniBus.Persistence.AzureStorage` provides Blob-backed payload storage for opaque MiniBus payload bytes. Applications can use it directly through the payload store, or enable optional claim-check/DataBus behavior so large outgoing `Send`, `Publish`, and `Schedule` bodies are stored in Blob Storage and replaced with compact Service Bus claim-check messages.
 
 ```csharp
 services.AddMiniBusAzureStoragePersistence(
@@ -137,9 +137,14 @@ services.AddMiniBusAzureStoragePersistence(
     {
         options.BlobNamePrefix = "payloads";
         options.PayloadRetention = TimeSpan.FromDays(7);
-    });
+    })
+    .AddMiniBusAzureBlobClaimCheck(payloadThresholdBytes: 128 * 1024);
 ```
 
-Use the options overload to provide a custom `BlobContainerClient` factory when an application owns Azure SDK client configuration. The payload store returns MiniBus-owned references and keeps Azure SDK types out of handlers, message contracts, saga data, and `MiniBus.Core`.
+Claim-check behavior is opt-in. Messages whose serialized body is at or below the threshold stay inline. Messages above the threshold are written through the configured Blob payload store, sent with MiniBus claim-check headers, and resolved by `MiniBusProcessor` before deserialization so handlers and sagas still receive the original message contract.
+
+Use the options overload to provide a custom `BlobContainerClient` factory when an application owns Azure SDK client configuration. The payload store returns MiniBus-owned references and keeps Azure SDK types out of handlers, message contracts, saga data, and handler-facing APIs.
+
+Configure Blob payload retention to exceed the longest expected processing window, including delayed retries, scheduled delivery, and SQL outbox replay. Disabling claim-check stops new outgoing messages from using Blob payload storage, but already queued claim-check messages still require receive-side payload resolution until they are processed or dead-lettered.
 
 `MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same tests against a live Azure Storage account.

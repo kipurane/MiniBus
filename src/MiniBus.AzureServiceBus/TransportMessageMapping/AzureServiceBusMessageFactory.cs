@@ -1,18 +1,24 @@
 using Azure.Messaging.ServiceBus;
-using MiniBus.AzureServiceBus.TransportMessageMapping;
+using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Serialization;
 
 namespace MiniBus.AzureServiceBus.TransportMessageMapping;
 
 public sealed class AzureServiceBusMessageFactory
 {
-    public const string DefaultContentType = "application/json";
-
     private readonly IMessageSerializer _serializer;
+    private readonly MiniBusClaimCheckMessageTransformer _transformer;
 
-    public AzureServiceBusMessageFactory(IMessageSerializer serializer)
+    public AzureServiceBusMessageFactory(
+        IMessageSerializer serializer,
+        MiniBusClaimCheckOptions? claimCheckOptions = null,
+        IMiniBusClaimCheckPayloadStore? claimCheckPayloadStore = null)
     {
         _serializer = serializer;
+        _transformer = new MiniBusClaimCheckMessageTransformer(
+            serializer,
+            claimCheckOptions,
+            claimCheckPayloadStore);
     }
 
     public ServiceBusMessage CreateMessage(
@@ -33,6 +39,23 @@ public sealed class AzureServiceBusMessageFactory
 
         AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, mappedHeaders);
         ApplySystemProperties(serviceBusMessage, mappedHeaders);
+
+        return serviceBusMessage;
+    }
+
+    public async Task<ServiceBusMessage> CreateMessageAsync(
+        object message,
+        Type messageType,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default)
+    {
+        var outgoingMessage = await _transformer
+            .TransformAsync(message, messageType, headers, cancellationToken)
+            .ConfigureAwait(false);
+        var serviceBusMessage = new ServiceBusMessage(outgoingMessage.Body);
+
+        AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, outgoingMessage.Headers);
+        ApplySystemProperties(serviceBusMessage, outgoingMessage.Headers);
 
         return serviceBusMessage;
     }
@@ -58,17 +81,7 @@ public sealed class AzureServiceBusMessageFactory
         Type messageType,
         IReadOnlyDictionary<string, string>? headers)
     {
-        var mappedHeaders = headers is null
-            ? new Dictionary<string, string>(StringComparer.Ordinal)
-            : new Dictionary<string, string>(headers, StringComparer.Ordinal);
-
-        var messageTypeName = messageType.AssemblyQualifiedName ?? messageType.FullName ?? messageType.Name;
-        mappedHeaders.TryAdd(MiniBusHeaderNames.MessageType, messageTypeName);
-        mappedHeaders.TryAdd(MiniBusHeaderNames.EnclosedMessageTypes, messageTypeName);
-        mappedHeaders.TryAdd(MiniBusHeaderNames.MessageId, Guid.NewGuid().ToString("N"));
-        mappedHeaders.TryAdd(MiniBusHeaderNames.ContentType, DefaultContentType);
-
-        return mappedHeaders;
+        return MiniBusClaimCheckMessageTransformer.CreateHeaders(messageType, headers);
     }
 
     private static void ApplySystemProperties(ServiceBusMessage message, IReadOnlyDictionary<string, string> headers)

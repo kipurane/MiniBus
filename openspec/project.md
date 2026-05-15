@@ -1259,8 +1259,8 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 - [x] Create `MiniBus.Persistence.AzureStorage` or equivalent storage package.
 - [x] Implement Blob payload store.
-- [ ] Implement large payload/DataBus/claim-check support.
-- [ ] Add receive-side claim-check resolution before deserialization.
+- [x] Implement large payload/DataBus/claim-check support.
+- [x] Add receive-side claim-check resolution before deserialization.
 - [ ] Implement optional Table Storage inbox.
 - [ ] Implement optional Table Storage saga store.
 - [ ] Implement audit blob writer.

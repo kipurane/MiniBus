@@ -21,7 +21,7 @@ public sealed class AzureServiceBusTransportDispatcher : IMiniBusOutboxDispatche
         _sender = sender;
     }
 
-    public Task SendAsync<TCommand>(
+    public async Task SendAsync<TCommand>(
         TCommand command,
         IReadOnlyDictionary<string, string>? headers = null,
         CancellationToken cancellationToken = default)
@@ -31,12 +31,14 @@ public sealed class AzureServiceBusTransportDispatcher : IMiniBusOutboxDispatche
 
         var messageType = typeof(TCommand);
         var destination = _routes.GetCommandQueue(messageType);
-        var message = _messageFactory.CreateMessage(command, messageType, headers);
+        var message = await _messageFactory
+            .CreateMessageAsync(command, messageType, headers, cancellationToken)
+            .ConfigureAwait(false);
 
-        return _sender.SendAsync(destination, message, cancellationToken);
+        await _sender.SendAsync(destination, message, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task PublishAsync<TEvent>(
+    public async Task PublishAsync<TEvent>(
         TEvent @event,
         IReadOnlyDictionary<string, string>? headers = null,
         CancellationToken cancellationToken = default)
@@ -46,12 +48,14 @@ public sealed class AzureServiceBusTransportDispatcher : IMiniBusOutboxDispatche
 
         var messageType = typeof(TEvent);
         var destination = _routes.GetEventTopic(messageType);
-        var message = _messageFactory.CreateMessage(@event, messageType, headers);
+        var message = await _messageFactory
+            .CreateMessageAsync(@event, messageType, headers, cancellationToken)
+            .ConfigureAwait(false);
 
-        return _sender.SendAsync(destination, message, cancellationToken);
+        await _sender.SendAsync(destination, message, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<long> ScheduleAsync<TMessage>(
+    public async Task<long> ScheduleAsync<TMessage>(
         TMessage message,
         DateTimeOffset dueTime,
         IReadOnlyDictionary<string, string>? headers = null,
@@ -62,9 +66,13 @@ public sealed class AzureServiceBusTransportDispatcher : IMiniBusOutboxDispatche
 
         var messageType = typeof(TMessage);
         var destination = _routes.GetScheduledDestination(messageType);
-        var serviceBusMessage = _messageFactory.CreateMessage(message, messageType, headers);
+        var serviceBusMessage = await _messageFactory
+            .CreateMessageAsync(message, messageType, headers, cancellationToken)
+            .ConfigureAwait(false);
 
-        return _sender.ScheduleAsync(destination, serviceBusMessage, dueTime, cancellationToken);
+        return await _sender
+            .ScheduleAsync(destination, serviceBusMessage, dueTime, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task DispatchAsync(

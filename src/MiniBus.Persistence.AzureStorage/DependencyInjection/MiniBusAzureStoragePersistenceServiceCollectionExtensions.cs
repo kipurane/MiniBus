@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using MiniBus.Core.ClaimCheck;
 
 namespace MiniBus.Persistence.AzureStorage.DependencyInjection;
 
@@ -43,8 +44,30 @@ public static class MiniBusAzureStoragePersistenceServiceCollectionExtensions
         MiniBusAzureStoragePersistenceOptionsValidator.Validate(options);
 
         services.AddSingleton(options);
-        services.AddSingleton<IMiniBusPayloadStore, BlobMiniBusPayloadStore>();
+        services.AddSingleton<BlobMiniBusPayloadStore>();
+        services.AddSingleton<IMiniBusPayloadStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<BlobMiniBusPayloadStore>());
+        services.AddSingleton<IMiniBusClaimCheckPayloadStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<BlobMiniBusPayloadStore>());
 
+        return services;
+    }
+
+    public static IServiceCollection AddMiniBusAzureBlobClaimCheck(
+        this IServiceCollection services,
+        long payloadThresholdBytes)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = new MiniBusClaimCheckOptions
+        {
+            Enabled = true,
+            PayloadThresholdBytes = payloadThresholdBytes,
+            Provider = MiniBusClaimCheckProviderNames.AzureBlobStorage
+        };
+        options.Validate();
+
+        services.AddSingleton(options);
         return services;
     }
 }

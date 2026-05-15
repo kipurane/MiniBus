@@ -1,6 +1,7 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using MiniBus.AzureFunctions.DependencyInjection;
+using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
@@ -216,6 +217,64 @@ public sealed class SqlPersistenceTests
     }
 
     [Fact]
+    public async Task OutboxOperationSerializer_StoresClaimCheckBodyAndHeadersForLargePayload()
+    {
+        var store = new RecordingClaimCheckPayloadStore();
+        var serializer = new SqlOutboxOperationSerializer(
+            new RecordingSerializer(),
+            new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
+            store);
+        var operation = new MiniBusOutboxOperation(
+            MiniBusOutboxOperationKind.Send,
+            new TestCommand(Guid.NewGuid()),
+            typeof(TestCommand),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+                [MiniBusHeaderNames.CausationId] = "message-1"
+            },
+            DueTime: null);
+
+        var serialized = await serializer.SerializeAsync(operation);
+        var stored = serializer.Deserialize(
+            Guid.NewGuid(),
+            "outgoing-message-1",
+            serialized.OperationKind,
+            serialized.MessageType,
+            serialized.Body,
+            serialized.HeadersJson,
+            serialized.DueTime,
+            attemptCount: 1);
+
+        Assert.Equal("serialized:TestCommand", Assert.Single(store.Writes).Payload.ToString());
+        Assert.NotEqual("serialized:TestCommand", stored.Body.ToString());
+        Assert.Equal(bool.TrueString, stored.Headers[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Equal(MiniBusClaimCheckProviderNames.AzureBlobStorage, stored.Headers[MiniBusClaimCheckHeaderNames.Provider]);
+        Assert.Equal("payloads/payload-1.bin", stored.Headers[MiniBusClaimCheckHeaderNames.BlobName]);
+        Assert.Equal("correlation-1", stored.Headers[MiniBusHeaderNames.CorrelationId]);
+        Assert.Equal("message-1", stored.Headers[MiniBusHeaderNames.CausationId]);
+    }
+
+    [Fact]
+    public void OutboxOperationSerializer_SyncSerializeRejectsEnabledClaimCheck()
+    {
+        var serializer = new SqlOutboxOperationSerializer(
+            new RecordingSerializer(),
+            new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
+            new RecordingClaimCheckPayloadStore());
+        var operation = new MiniBusOutboxOperation(
+            MiniBusOutboxOperationKind.Send,
+            new TestCommand(Guid.NewGuid()),
+            typeof(TestCommand),
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            DueTime: null);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => serializer.Serialize(operation));
+
+        Assert.Contains(nameof(SqlOutboxOperationSerializer.SerializeAsync), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task OutboxDispatcher_MarksSuccessfulDispatch()
     {
         var operation = CreateStoredOperation();
@@ -414,6 +473,35 @@ public sealed class SqlPersistenceTests
         public Task<int> CleanupAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(0);
+        }
+    }
+
+    private sealed class RecordingClaimCheckPayloadStore : IMiniBusClaimCheckPayloadStore
+    {
+        public List<(BinaryData Payload, MiniBusClaimCheckPayloadWriteOptions? Options)> Writes { get; } = new();
+
+        public Task<MiniBusClaimCheckPayloadReference> WriteAsync(
+            BinaryData payload,
+            MiniBusClaimCheckPayloadWriteOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add((payload, options));
+            return Task.FromResult(new MiniBusClaimCheckPayloadReference(
+                MiniBusClaimCheckProviderNames.AzureBlobStorage,
+                "minibus-payloads",
+                "payloads/payload-1.bin",
+                "payload-1",
+                payload.ToArray().LongLength,
+                options?.ContentType,
+                new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero),
+                null));
+        }
+
+        public Task<BinaryData> ReadAsync(
+            MiniBusClaimCheckPayloadReference reference,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
         }
     }
 
