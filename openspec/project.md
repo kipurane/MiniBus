@@ -1215,45 +1215,46 @@ Implement:
 
 This list is the updateable checklist of work still needed for MiniBus to become a fully operational framework. Keep it current as OpenSpec changes are proposed, implemented, and archived.
 
-Next major framework feature: **first-class SQL Server/Azure SQL support for `MiniBus.Persistence.Sql`**. The current inbox/outbox implementation is sufficient as a provider-neutral foundation because applications can supply a `DbConnection` factory; the remaining work is to make SQL Server/Azure SQL turnkey and prove it with real SQL integration tests.
+Next major framework feature: **saga timeout support**. SQL Server/Azure SQL inbox/outbox and saga persistence are now first-class enough for durable workflows; the remaining saga gap is a clear API and storage/transport strategy for scheduling and dispatching timeouts.
 
 ### 24.1 Core and processing architecture
 
-- [ ] Decide whether to introduce a broader `MiniBusOptions` core configuration object beyond the current package-specific options.
-- [ ] Refactor `MiniBusProcessor` orchestration into explicit pipeline behaviors.
-- [ ] Add a pipeline context that can carry received message metadata, deserialized payloads, headers, recoverability state, saga state, outgoing operations, and settlement decisions.
-- [ ] Add unit tests for pipeline ordering and behavior isolation.
+- [x] Decide whether to introduce a broader `MiniBusOptions` core configuration object beyond the current package-specific options.
+- [x] Refactor `MiniBusProcessor` orchestration into explicit pipeline behaviors.
+- [x] Add a pipeline context that can carry received message metadata, deserialized payloads, headers, recoverability state, saga state, outgoing operations, and settlement decisions.
+- [x] Add unit tests for pipeline ordering and behavior isolation.
 
 ### 24.2 SQL persistence and production reliability
 
 - [x] Create `MiniBus.Persistence.Sql`.
 - [x] Add a provider-neutral SQL connection/session abstraction based on caller-provided `DbConnection`.
-- [ ] Add first-class SQL Server/Azure SQL provider support with `Microsoft.Data.SqlClient`.
-- [ ] Add connection-string-based registration for SQL Server/Azure SQL while preserving the existing `DbConnection` factory escape hatch.
-- [ ] Define how MiniBus persistence shares a transaction boundary with business data when configured.
+- [x] Add first-class SQL Server/Azure SQL provider support with `Microsoft.Data.SqlClient`.
+- [x] Add connection-string-based registration for SQL Server/Azure SQL while preserving the existing `DbConnection` factory escape hatch.
+- [x] Define how MiniBus persistence shares a transaction boundary with business data when configured.
 - [x] Implement inbox table schema and duplicate-message detection.
 - [x] Complete duplicate messages without re-running business handlers.
 - [x] Implement outbox table schema.
 - [x] Capture outgoing `Send`, `Publish`, and `Schedule` operations into the outbox.
 - [x] Dispatch pending outbox operations after successful processing.
-- [ ] Add deterministic outgoing message IDs for replay-safe outbox dispatch.
+- [x] Add deterministic outgoing message IDs for replay-safe outbox dispatch.
 - [x] Mark outbox operations as dispatched and support retry metadata after dispatch failures.
-- [ ] Harden outbox crash recovery semantics with SQL Server/Azure SQL integration coverage.
-- [ ] Add cleanup and expiry policy for inbox/outbox records.
-- [ ] Decide whether migrations are framework-owned or shipped as SQL scripts.
-- [ ] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
+- [x] Harden outbox crash recovery semantics with SQL Server/Azure SQL integration coverage.
+- [x] Add cleanup and expiry policy for inbox/outbox records.
+- [x] Decide whether migrations are framework-owned or shipped as SQL scripts.
+- [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
 
 ### 24.3 Saga follow-ups
 
-Basic saga contracts, correlation, invocation, and in-memory persistence exist. The remaining saga work is production persistence and timeout behavior.
+Basic saga contracts, correlation, invocation, in-memory persistence, and SQL persistence exist. The remaining saga work is timeout behavior.
 
-- [ ] Implement SQL saga persistence.
-- [ ] Implement durable optimistic concurrency using SQL version metadata.
-- [ ] Ensure saga persistence failures and concurrency conflicts flow through recoverability.
+- [x] Implement SQL saga persistence.
+- [x] Implement durable optimistic concurrency using SQL version metadata.
+- [x] Ensure saga persistence failures and concurrency conflicts flow through recoverability.
 - [ ] Add saga timeout scheduling APIs or conventions.
 - [ ] Decide whether saga timeouts use Service Bus scheduled messages only or an optional SQL timeout table.
 - [ ] Implement optional SQL timeout table and dispatcher if durable SQL-managed timeouts are desired.
-- [ ] Add integration tests for SQL saga load/create/save/complete, concurrency conflicts, and timeout dispatch.
+- [x] Add integration tests for SQL saga load/create/save/complete and concurrency conflicts.
+- [ ] Add integration tests for saga timeout dispatch.
 
 ### 24.4 Azure Storage support
 
