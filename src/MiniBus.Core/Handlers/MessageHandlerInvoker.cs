@@ -10,7 +10,8 @@ public sealed class MessageHandlerInvoker
         object message,
         MiniBusContext context,
         IServiceProvider serviceProvider,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<Type>? handlerInvoked = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(context);
@@ -36,6 +37,7 @@ public sealed class MessageHandlerInvoker
                 continue;
             }
 
+            handlerInvoked?.Invoke(handler.GetType());
             var invocationResult = handleMethod.Invoke(handler, new[] { message, context, cancellationToken });
             if (invocationResult is not Task task)
             {
@@ -46,4 +48,3 @@ public sealed class MessageHandlerInvoker
         }
     }
 }
-

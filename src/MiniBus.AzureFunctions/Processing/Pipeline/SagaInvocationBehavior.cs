@@ -5,13 +5,16 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly MiniBusProcessingLogger _processingLogger;
     private readonly SagaInvoker? _sagaInvoker;
 
     public SagaInvocationBehavior(
         IServiceProvider serviceProvider,
+        MiniBusProcessingLogger processingLogger,
         SagaInvoker? sagaInvoker)
     {
         _serviceProvider = serviceProvider;
+        _processingLogger = processingLogger;
         _sagaInvoker = sagaInvoker;
     }
 
@@ -42,7 +45,19 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
         }
 
         await _sagaInvoker
-            .InvokeAsync(context.DeserializedMessage, context.HandlerContext, _serviceProvider, cancellationToken)
+            .InvokeAsync(
+                context.DeserializedMessage,
+                context.HandlerContext,
+                _serviceProvider,
+                cancellationToken,
+                diagnostic =>
+                {
+                    _processingLogger.SagaInvoked(context, diagnostic.SagaType, diagnostic.CorrelationId);
+                    if (diagnostic.Completed)
+                    {
+                        _processingLogger.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
+                    }
+                })
             .ConfigureAwait(false);
 
         await next(context, cancellationToken).ConfigureAwait(false);

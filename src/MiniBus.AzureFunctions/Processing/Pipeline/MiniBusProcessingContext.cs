@@ -7,6 +7,9 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 
 internal sealed class MiniBusProcessingContext
 {
+    private static readonly IReadOnlyDictionary<string, string> EmptyHeaders =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     public MiniBusProcessingContext(
         ServiceBusReceivedMessage message,
         MiniBusProcessorOptions options,
@@ -27,7 +30,7 @@ internal sealed class MiniBusProcessingContext
     public IMiniBusMessageActions? Actions { get; }
 
     public IReadOnlyDictionary<string, string> Headers { get; set; } =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+        EmptyHeaders;
 
     public Type? MessageType { get; set; }
 
@@ -47,6 +50,12 @@ internal sealed class MiniBusProcessingContext
     public RecoverabilityDecision? RecoverabilityDecision { get; set; }
 
     public MiniBusSettlementDecision SettlementDecision { get; set; } = MiniBusSettlementDecision.None();
+
+    public Type? LastHandlerType { get; set; }
+
+    public Type? LastSagaType { get; set; }
+
+    public string? LastSagaCorrelationId { get; set; }
 
     public bool IsShortCircuited { get; private set; }
 

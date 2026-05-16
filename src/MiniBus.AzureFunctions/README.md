@@ -47,6 +47,14 @@ services.AddMiniBusAzureFunctions(options =>
 
 Immediate retries run inside the same `MiniBusProcessor` invocation. Delayed retries use Azure Service Bus scheduled message copies and preserve MiniBus correlation, original message id, retry, and exception headers.
 
+## Structured processing logs
+
+MiniBus emits framework-level processing diagnostics through `Microsoft.Extensions.Logging`. Applications keep control of logging providers and sinks; MiniBus uses the host application's existing logging configuration and does not require a MiniBus-specific provider.
+
+Each processing attempt creates a structured log scope after received headers are mapped. MiniBus log entries use stable property names such as `EndpointName`, `MessageType`, `MessageId`, `CorrelationId`, `CausationId`, `RetryAttempt`, `DelayedRetryAttempt`, `HandlerType`, `SagaType`, `SagaCorrelationId`, `ProcessingOutcome`, `OutboxOperationCount`, and `DeadLetterReason` when those values are available.
+
+Processing logs include attempt start, completion, duplicate inbox skips, immediate retry, delayed retry scheduling, dead-lettering, propagated failure, handler invocation, saga invocation/completion, and outbox commit diagnostics. These logs are provider-neutral and are intended to be usable today while leaving OpenTelemetry tracing and metrics as separate observability features.
+
 Minimal saga support uses core saga contracts and explicit correlation mappings:
 
 ```csharp

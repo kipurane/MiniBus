@@ -5,12 +5,21 @@ namespace MiniBus.Core.Sagas;
 
 public sealed class SagaInvoker
 {
+    private delegate Task SagaInvocationDelegate(
+        SagaInvoker invoker,
+        SagaCorrelationRule rule,
+        object message,
+        MiniBusContext context,
+        IServiceProvider serviceProvider,
+        CancellationToken cancellationToken,
+        Action<SagaInvocationDiagnostic>? sagaInvoked);
+
     private static readonly System.Reflection.MethodInfo InvokeDefinitionCoreMethod =
         typeof(SagaInvoker)
             .GetMethod(nameof(InvokeDefinitionCoreAsync), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("Saga invoker core method could not be found.");
 
-    private readonly Dictionary<(Type SagaType, Type DataType, Type MessageType), Func<SagaInvoker, SagaCorrelationRule, object, MiniBusContext, IServiceProvider, CancellationToken, Task>> _invokeDelegates = new();
+    private readonly Dictionary<(Type SagaType, Type DataType, Type MessageType), SagaInvocationDelegate> _invokeDelegates = new();
     private readonly SagaRegistry _registry;
     private readonly ISagaPersistence _persistence;
 
@@ -24,7 +33,8 @@ public sealed class SagaInvoker
         object message,
         MiniBusContext context,
         IServiceProvider serviceProvider,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<SagaInvocationDiagnostic>? sagaInvoked = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(context);
@@ -38,7 +48,8 @@ public sealed class SagaInvoker
                     message,
                     context,
                     serviceProvider,
-                    cancellationToken)
+                    cancellationToken,
+                    sagaInvoked)
                 .ConfigureAwait(false);
         }
     }
@@ -48,14 +59,15 @@ public sealed class SagaInvoker
         object message,
         MiniBusContext context,
         IServiceProvider serviceProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<SagaInvocationDiagnostic>? sagaInvoked)
     {
         var rule = ResolveRule(definition, message.GetType());
         var invoke = GetInvokeDelegate(definition.SagaType, definition.DataType, rule.MessageType);
-        return invoke(this, rule, message, context, serviceProvider, cancellationToken);
+        return invoke(this, rule, message, context, serviceProvider, cancellationToken, sagaInvoked);
     }
 
-    private Func<SagaInvoker, SagaCorrelationRule, object, MiniBusContext, IServiceProvider, CancellationToken, Task> GetInvokeDelegate(
+    private SagaInvocationDelegate GetInvokeDelegate(
         Type sagaType,
         Type dataType,
         Type messageType)
@@ -67,13 +79,7 @@ public sealed class SagaInvoker
         }
 
         var genericMethod = InvokeDefinitionCoreMethod.MakeGenericMethod(sagaType, dataType, messageType);
-        invoke = (invoker, rule, message, context, serviceProvider, cancellationToken) =>
-        {
-            var result = genericMethod.Invoke(invoker, new object[] { rule, message, context, serviceProvider, cancellationToken });
-            return result is Task task
-                ? task
-                : throw new InvalidOperationException("Saga invoker core method did not return a Task.");
-        };
+        invoke = genericMethod.CreateDelegate<SagaInvocationDelegate>();
         _invokeDelegates.Add(key, invoke);
 
         return invoke;
@@ -84,7 +90,8 @@ public sealed class SagaInvoker
         object message,
         MiniBusContext context,
         IServiceProvider serviceProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<SagaInvocationDiagnostic>? sagaInvoked)
         where TSaga : MiniBusSaga<TData>, IHandleSagaMessages<TMessage>, new()
         where TData : class, ISagaData, new()
         where TMessage : IMessage
@@ -133,6 +140,7 @@ public sealed class SagaInvoker
         if (data.IsCompleted)
         {
             await _persistence.CompleteAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
+            sagaInvoked?.Invoke(new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: true));
             return;
         }
 
@@ -140,6 +148,8 @@ public sealed class SagaInvoker
         {
             await _persistence.SaveAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
         }
+
+        sagaInvoked?.Invoke(new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: false));
     }
 
     private static SagaCorrelationRule ResolveRule(SagaDefinition definition, Type messageType)

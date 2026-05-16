@@ -5,13 +5,13 @@ using MiniBus.Samples.FunctionApp.Contracts;
 
 namespace MiniBus.Samples.FunctionApp.Handlers;
 
-public sealed class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
+public sealed partial class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
 {
-    private readonly ILogger<CreateInvoiceHandler> logger;
+    private readonly ILogger<CreateInvoiceHandler> _logger;
 
     public CreateInvoiceHandler(ILogger<CreateInvoiceHandler> logger)
     {
-        this.logger = logger;
+        _logger = logger;
     }
 
     public async Task Handle(
@@ -19,10 +19,7 @@ public sealed class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
         MiniBusContext context,
         CancellationToken cancellationToken)
     {
-        logger.LogInformation(
-            "Creating invoice {InvoiceId} for customer {CustomerId}.",
-            message.InvoiceId,
-            message.CustomerId);
+        LogCreatingInvoice(_logger, message.InvoiceId, message.CustomerId);
 
         await context.Publish(
                 new InvoiceCreated(message.InvoiceId, message.CustomerId, message.Amount),
@@ -34,4 +31,13 @@ public sealed class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
                 cancellationToken)
             .ConfigureAwait(false);
     }
+
+    [LoggerMessage(
+        EventId = 0,
+        Level = LogLevel.Information,
+        Message = "Creating invoice {InvoiceId} for customer {CustomerId}.")]
+    private static partial void LogCreatingInvoice(
+        ILogger logger,
+        string invoiceId,
+        string customerId);
 }

@@ -8,6 +8,9 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 
 internal static class MiniBusAuditRecordFactory
 {
+    private static readonly IReadOnlyDictionary<string, string> EmptyHeaders =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     public static MiniBusAuditRecord Create(
         MiniBusProcessingContext context,
         MiniBusAuditProcessingOutcome outcome,
@@ -79,11 +82,22 @@ internal static class MiniBusAuditRecordFactory
 
     private static IReadOnlyDictionary<string, string> GetRecoverabilityMetadata(IReadOnlyDictionary<string, string> headers)
     {
-        return headers
-            .Where(pair => pair.Key.StartsWith("MiniBus.Retry.", StringComparison.Ordinal)
-                           || pair.Key.StartsWith("MiniBus.Exception.", StringComparison.Ordinal)
-                           || string.Equals(pair.Key, MiniBusRecoverabilityHeaderNames.OriginalMessageId, StringComparison.Ordinal))
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        Dictionary<string, string>? recoverabilityMetadata = null;
+
+        foreach (var pair in headers)
+        {
+            if (!pair.Key.StartsWith("MiniBus.Retry.", StringComparison.Ordinal)
+                && !pair.Key.StartsWith("MiniBus.Exception.", StringComparison.Ordinal)
+                && !string.Equals(pair.Key, MiniBusRecoverabilityHeaderNames.OriginalMessageId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            recoverabilityMetadata ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            recoverabilityMetadata[pair.Key] = pair.Value;
+        }
+
+        return recoverabilityMetadata ?? EmptyHeaders;
     }
 
     private static string? GetHeaderValue(

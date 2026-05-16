@@ -13,14 +13,18 @@ internal sealed record MiniBusSettlementDecision(
     string? DeadLetterReason = null,
     string? DeadLetterDescription = null)
 {
+    private static readonly MiniBusSettlementDecision NoneDecision = new(MiniBusSettlementDecisionKind.None);
+    private static readonly MiniBusSettlementDecision CompleteDecision = new(MiniBusSettlementDecisionKind.Complete);
+    private static readonly MiniBusSettlementDecision DelayedRetryDecision = new(MiniBusSettlementDecisionKind.DelayedRetry);
+
     public static MiniBusSettlementDecision None()
     {
-        return new MiniBusSettlementDecision(MiniBusSettlementDecisionKind.None);
+        return NoneDecision;
     }
 
     public static MiniBusSettlementDecision Complete()
     {
-        return new MiniBusSettlementDecision(MiniBusSettlementDecisionKind.Complete);
+        return CompleteDecision;
     }
 
     public static MiniBusSettlementDecision DeadLetter(
@@ -35,6 +39,6 @@ internal sealed record MiniBusSettlementDecision(
 
     public static MiniBusSettlementDecision DelayedRetry()
     {
-        return new MiniBusSettlementDecision(MiniBusSettlementDecisionKind.DelayedRetry);
+        return DelayedRetryDecision;
     }
 }

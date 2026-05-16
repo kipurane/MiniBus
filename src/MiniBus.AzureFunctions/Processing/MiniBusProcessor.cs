@@ -1,6 +1,7 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using MiniBus.AzureFunctions.Processing.Pipeline;
 using MiniBus.AzureFunctions.Settlement;
 using MiniBus.Core.Auditing;
@@ -17,12 +18,14 @@ public sealed class MiniBusProcessor
     public const string DeadLetterReason = "MiniBus processing failed";
 
     private static readonly ReceivedMessageHeadersBehavior ReceivedMessageHeadersBehavior = new();
+    private static readonly MiniBusProcessingDelegate NoopProcessingDelegate = static (_, _) => Task.CompletedTask;
 
     private readonly MiniBusProcessorOptions _options;
     private readonly IServiceProvider _serviceProvider;
     private readonly RecoverabilityDecisionMaker _recoverabilityDecisionMaker;
     private readonly MiniBusProcessingPipeline _pipeline;
     private readonly DelayedRetryScheduler _delayedRetryScheduler;
+    private readonly MiniBusProcessingLogger _processingLogger;
 
     public MiniBusProcessor(
         IMessageSerializer serializer,
@@ -39,7 +42,8 @@ public sealed class MiniBusProcessor
         _options = options ?? new MiniBusProcessorOptions();
         _serviceProvider = serviceProvider;
         _recoverabilityDecisionMaker = recoverabilityDecisionMaker ?? new RecoverabilityDecisionMaker();
-        _pipeline = CreatePipeline(serializer, handlerInvoker, serviceProvider, sagaInvoker);
+        _processingLogger = new MiniBusProcessingLogger(serviceProvider.GetService<ILoggerFactory>());
+        _pipeline = CreatePipeline(serializer, handlerInvoker, serviceProvider, _processingLogger, sagaInvoker);
         _delayedRetryScheduler = new DelayedRetryScheduler(serviceProvider);
     }
 
@@ -70,18 +74,18 @@ public sealed class MiniBusProcessor
         ArgumentNullException.ThrowIfNull(actions);
 
         var context = new MiniBusProcessingContext(message, _options, actions);
-        await ReceivedMessageHeadersBehavior
-            .InvokeAsync(context, (_, _) => Task.CompletedTask, cancellationToken)
-            .ConfigureAwait(false);
+        await LoadReceivedMessageHeadersAsync(context, cancellationToken).ConfigureAwait(false);
 
         // Immediate retries stay in this invocation; delayed retry, dead-letter, propagate, and success paths return or throw.
         while (true)
         {
+            using var processingScope = BeginProcessingAttempt(context);
             try
             {
                 await _pipeline.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
 
                 context.SettlementDecision = MiniBusSettlementDecision.Complete();
+                LogTerminalSuccess(context);
                 await AuditAsync(
                         context,
                         context.IsShortCircuited
@@ -92,9 +96,7 @@ public sealed class MiniBusProcessor
                 await ApplySettlementAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
-            catch (Exception exception) when (exception is not MiniBusPersistenceCommitException
-                                             && exception is not MiniBusAuditWriteException
-                                             && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+            catch (Exception exception) when (IsRecoverableProcessingException(exception, cancellationToken))
             {
                 var decision = _recoverabilityDecisionMaker.Decide(
                     context.Headers,
@@ -108,6 +110,7 @@ public sealed class MiniBusProcessor
                 switch (decision.Kind)
                 {
                     case RecoverabilityDecisionKind.ImmediateRetry:
+                        _processingLogger.ProcessingRetried(context, exception);
                         context = new MiniBusProcessingContext(message, _options, actions)
                         {
                             Headers = decision.Headers,
@@ -116,9 +119,19 @@ public sealed class MiniBusProcessor
                         continue;
                     case RecoverabilityDecisionKind.DelayedRetry:
                         context.SettlementDecision = MiniBusSettlementDecision.DelayedRetry();
-                        await _delayedRetryScheduler.ScheduleAsync(context, decision, cancellationToken)
-                            .ConfigureAwait(false);
+                        try
+                        {
+                            await _delayedRetryScheduler.ScheduleAsync(context, decision, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (IsNotCallerRequestedCancellation(ex, cancellationToken))
+                        {
+                            _processingLogger.ProcessingFailed(context, ex);
+                            throw;
+                        }
+
                         context.SettlementDecision = MiniBusSettlementDecision.Complete();
+                        _processingLogger.ProcessingDelayedRetryScheduled(context);
                         await AuditAsync(
                                 context,
                                 MiniBusAuditProcessingOutcome.DelayedRetryScheduled,
@@ -130,6 +143,10 @@ public sealed class MiniBusProcessor
                         context.SettlementDecision = MiniBusSettlementDecision.DeadLetter(
                             decision.DeadLetterReason ?? RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason,
                             decision.DeadLetterDescription);
+                        _processingLogger.ProcessingDeadLettered(
+                            context,
+                            context.SettlementDecision.DeadLetterReason,
+                            context.SettlementDecision.DeadLetterDescription);
                         await AuditAsync(
                                 context,
                                 MiniBusAuditProcessingOutcome.DeadLettered,
@@ -141,8 +158,16 @@ public sealed class MiniBusProcessor
                         return;
                     case RecoverabilityDecisionKind.Propagate:
                     default:
+                        _processingLogger.ProcessingFailed(context, exception);
                         throw;
                 }
+            }
+            // Exceptions rethrown from the recoverability catch above do not flow into sibling catches on this try.
+            // This catch therefore only handles failures from the main processing body that were not already logged.
+            catch (Exception exception) when (IsNotCallerRequestedCancellation(exception, cancellationToken))
+            {
+                _processingLogger.ProcessingFailed(context, exception);
+                throw;
             }
         }
     }
@@ -151,33 +176,72 @@ public sealed class MiniBusProcessor
         MiniBusProcessingContext context,
         CancellationToken cancellationToken)
     {
-        await _pipeline.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
-        await AuditAsync(
-                context,
-                context.IsShortCircuited
-                    ? MiniBusAuditProcessingOutcome.SkippedDuplicate
-                    : MiniBusAuditProcessingOutcome.Completed,
-                cancellationToken)
-            .ConfigureAwait(false);
+        await LoadReceivedMessageHeadersAsync(context, cancellationToken).ConfigureAwait(false);
+
+        using var processingScope = BeginProcessingAttempt(context);
+        try
+        {
+            await _pipeline.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+            LogTerminalSuccess(context);
+            await AuditAsync(
+                    context,
+                    context.IsShortCircuited
+                        ? MiniBusAuditProcessingOutcome.SkippedDuplicate
+                        : MiniBusAuditProcessingOutcome.Completed,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsNotCallerRequestedCancellation(exception, cancellationToken))
+        {
+            _processingLogger.ProcessingFailed(context, exception);
+            throw;
+        }
     }
 
     private static MiniBusProcessingPipeline CreatePipeline(
         IMessageSerializer serializer,
         MessageHandlerInvoker handlerInvoker,
         IServiceProvider serviceProvider,
+        MiniBusProcessingLogger processingLogger,
         SagaInvoker? sagaInvoker)
     {
         return new MiniBusProcessingPipeline(new IMiniBusProcessingBehavior[]
         {
-            new ReceivedMessageHeadersBehavior(),
-            new PersistenceBehavior(serviceProvider),
+            new PersistenceBehavior(serviceProvider, processingLogger),
             new MessageTypeResolutionBehavior(),
             new ClaimCheckPayloadResolutionBehavior(serviceProvider),
             new MessageDeserializationBehavior(serializer),
             new HandlerContextBehavior(serviceProvider),
-            new HandlerInvocationBehavior(handlerInvoker, serviceProvider),
-            new SagaInvocationBehavior(serviceProvider, sagaInvoker)
+            new HandlerInvocationBehavior(handlerInvoker, processingLogger, serviceProvider),
+            new SagaInvocationBehavior(serviceProvider, processingLogger, sagaInvoker)
         });
+    }
+
+    private IDisposable BeginProcessingAttempt(MiniBusProcessingContext context)
+    {
+        var scope = _processingLogger.BeginProcessingScope(context);
+        _processingLogger.ProcessingStarted(context);
+        return scope;
+    }
+
+    private static Task LoadReceivedMessageHeadersAsync(
+        MiniBusProcessingContext context,
+        CancellationToken cancellationToken)
+    {
+        // Header loading happens before processing begins so the initial scope and start log include message metadata
+        // consistently for settlement and no-settlement processing paths.
+        return ReceivedMessageHeadersBehavior.InvokeAsync(context, NoopProcessingDelegate, cancellationToken);
+    }
+
+    private void LogTerminalSuccess(MiniBusProcessingContext context)
+    {
+        if (context.IsShortCircuited)
+        {
+            _processingLogger.ProcessingSkippedDuplicate(context);
+            return;
+        }
+
+        _processingLogger.ProcessingCompleted(context);
     }
 
     private static async Task ApplySettlementAsync(
@@ -236,9 +300,26 @@ public sealed class MiniBusProcessor
 
             await auditWriter.WriteAsync(record, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (IsNotCallerRequestedCancellation(exception, cancellationToken))
         {
             throw new MiniBusAuditWriteException("MiniBus audit write failed.", exception);
         }
+    }
+
+    private static bool IsNotCallerRequestedCancellation(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        return exception is not OperationCanceledException
+               || !cancellationToken.IsCancellationRequested;
+    }
+
+    private static bool IsRecoverableProcessingException(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        return exception is not MiniBusPersistenceCommitException
+               && exception is not MiniBusAuditWriteException
+               && IsNotCallerRequestedCancellation(exception, cancellationToken);
     }
 }

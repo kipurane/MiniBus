@@ -1,5 +1,4 @@
 using MiniBus.Core.Context;
-using MiniBus.Core.Contracts;
 using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Persistence;
@@ -11,6 +10,8 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
     private readonly IReadOnlyDictionary<string, string> _headers;
     private readonly IServiceProvider _serviceProvider;
     private readonly MiniBusOutboxOperationCollector? _outboxCollector;
+    private IReadOnlyDictionary<string, string>? _outgoingHeaderTemplate;
+    private AzureServiceBusTransportDispatcher? _dispatcher;
 
     public MiniBusReceivedMessageContext(
         string endpointName,
@@ -95,12 +96,22 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
 
     private AzureServiceBusTransportDispatcher GetDispatcher()
     {
-        return _serviceProvider.GetService(typeof(AzureServiceBusTransportDispatcher)) as AzureServiceBusTransportDispatcher
-               ?? throw new InvalidOperationException("Azure Service Bus transport dispatch is not configured for MiniBus Azure Functions processing.");
+        return _dispatcher ??= _serviceProvider.GetService(typeof(AzureServiceBusTransportDispatcher)) as AzureServiceBusTransportDispatcher
+                              ?? throw new InvalidOperationException("Azure Service Bus transport dispatch is not configured for MiniBus Azure Functions processing.");
     }
 
     private IReadOnlyDictionary<string, string> CreateOutgoingHeaders()
     {
+        return new Dictionary<string, string>(GetOutgoingHeaderTemplate(), StringComparer.Ordinal);
+    }
+
+    private IReadOnlyDictionary<string, string> GetOutgoingHeaderTemplate()
+    {
+        if (_outgoingHeaderTemplate is not null)
+        {
+            return _outgoingHeaderTemplate;
+        }
+
         var outgoingHeaders = new Dictionary<string, string>(_headers, StringComparer.Ordinal)
         {
             [MiniBusHeaderNames.CorrelationId] = CorrelationId,
@@ -112,6 +123,7 @@ internal sealed class MiniBusReceivedMessageContext : MiniBusContext
         outgoingHeaders.Remove(MiniBusHeaderNames.EnclosedMessageTypes);
         outgoingHeaders.Remove(MiniBusHeaderNames.ContentType);
 
+        _outgoingHeaderTemplate = outgoingHeaders;
         return outgoingHeaders;
     }
 }

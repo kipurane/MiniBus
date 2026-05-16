@@ -1266,13 +1266,13 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 ### 24.5 Observability
 
-- [ ] Add structured logging integration.
-- [ ] Add correlation-aware log scopes.
+- [x] Add structured logging integration.
+- [x] Add correlation-aware log scopes.
 - [ ] Add OpenTelemetry-friendly activities/tracing.
-- [ ] Emit diagnostic metadata such as endpoint name, message type, message id, correlation id, causation id, handler type, retry attempt, delayed retry attempt, saga type, and saga correlation id.
-- [ ] Add processing outcome diagnostics for completed, retried, delayed, dead-lettered, skipped duplicate, saga-completed, and outbox-dispatched outcomes.
+- [x] Emit diagnostic metadata such as endpoint name, message type, message id, correlation id, causation id, handler type, retry attempt, delayed retry attempt, saga type, and saga correlation id.
+- [x] Add processing outcome diagnostics for completed, retried, delayed, dead-lettered, skipped duplicate, saga-completed, and outbox-dispatched outcomes.
 - [ ] Add metrics for processing duration, handler duration, retry counts, dead-letter counts, outbox dispatch duration, and saga handling.
-- [ ] Add tests or verification hooks for log/tracing metadata.
+- [x] Add tests or verification hooks for log/tracing metadata.
 
 ### 24.6 Developer experience
 
