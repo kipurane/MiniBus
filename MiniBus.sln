@@ -48,6 +48,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Persistence.AzureSt
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Persistence.AzureStorage", "src\MiniBus.Persistence.AzureStorage\MiniBus.Persistence.AzureStorage.csproj", "{224C97D2-E48C-43BD-9D6C-5779C33B9AA8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.AcceptanceTests", "tests\MiniBus.AcceptanceTests\MiniBus.AcceptanceTests.csproj", "{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -190,6 +192,18 @@ Global
 		{224C97D2-E48C-43BD-9D6C-5779C33B9AA8}.Release|x64.Build.0 = Release|Any CPU
 		{224C97D2-E48C-43BD-9D6C-5779C33B9AA8}.Release|x86.ActiveCfg = Release|Any CPU
 		{224C97D2-E48C-43BD-9D6C-5779C33B9AA8}.Release|x86.Build.0 = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|x64.Build.0 = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Debug|x86.Build.0 = Debug|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|x64.ActiveCfg = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|x64.Build.0 = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|x86.ActiveCfg = Release|Any CPU
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -209,5 +223,6 @@ Global
 		{B8BD1694-58DA-4E22-A3B4-2B9F24ACB40B} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
 		{354C9126-C812-4AFB-BD33-7B6B6B99629E} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
 		{224C97D2-E48C-43BD-9D6C-5779C33B9AA8} = {5AB2733C-61E3-4E08-9A37-03783C1012D1}
+		{ECB38000-E83F-437B-9FF9-9BB2953E1C9B} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
 	EndGlobalSection
 EndGlobal

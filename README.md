@@ -57,7 +57,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
 - `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
-- `tests/*`: unit tests for core behavior, transport, Functions processing, and SQL persistence components.
+- `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## SQL Persistence
 
@@ -172,6 +172,20 @@ dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.cs
 ```
 
 When the environment variable is set, the integration tests use that database and create isolated `MiniBusTest_<guid>` schemas inside it. When it is not set, they try the Testcontainers/Docker path.
+
+### Reference Solution Acceptance Tests
+
+`MiniBus.AcceptanceTests` provides a small high-level canary layer above the unit, adapter, transport, SQL, and Azure Storage suites.
+
+Tier 1 acceptance tests are always-on and infrastructure-free. They build a real service provider from sample-style MiniBus registration, use recording transport and settlement doubles, and process a realistic billing workflow without Docker, live Azure Service Bus, or a real Azure Functions host.
+
+Tier 2 acceptance tests verify one SQL-backed reference workflow. They use the same SQL Server Testcontainers path as the SQL persistence integration tests, or `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` when an external SQL Server/Azure SQL database should be used. If neither Docker nor the external connection string is available, SQL-backed acceptance tests skip with a clear reason.
+
+Run the acceptance tests:
+
+```bash
+dotnet test tests/MiniBus.AcceptanceTests/MiniBus.AcceptanceTests.csproj
+```
 
 ## Development Workflow
 
