@@ -1299,6 +1299,7 @@ This list captures capabilities that may become valuable later but should not di
 - [ ] Add optional Azure Table Storage inbox and saga persistence if MiniBus needs a SQL-free Azure Storage reliability mode for lightweight/serverless workloads.
 - [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
 - [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
+- [ ] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the recording transport receives the expected send, publish, and schedule operations.
 - [ ] Add an optional one-topic-per-event-type topology if the shared topic plus subscription filter model becomes too limiting.
 
 ---
