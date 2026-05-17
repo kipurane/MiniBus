@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MiniBus.AzureFunctions.DependencyInjection;
@@ -316,6 +317,203 @@ public sealed class MiniBusProcessorTests
         Assert.Equal(MiniBusProcessingOutcomes.Failed, GetTag(activity, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
         Assert.Equal(typeof(MiniBusAuditWriteException).FullName, GetTag(activity, MiniBusProcessingTraceTags.ExceptionType));
         Assert.Equal(ActivityStatusCode.Error, activity.Status);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsProcessingMetricsForSuccessfulProcessing()
+    {
+        using var metrics = new RecordingMeterListener(MiniBusProcessingMetrics.MeterName);
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        });
+
+        await processor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+            [MiniBusHeaderNames.CausationId] = "causation-1"
+        }), new RecordingMessageActions());
+
+        var attempts = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingAttemptsInstrumentName);
+        Assert.Equal(1L, attempts.Value);
+        Assert.Equal(MiniBusProcessingMetrics.MeterName, attempts.MeterName);
+        Assert.Equal(MiniBusProcessingMetrics.AttemptsUnit, attempts.Unit);
+        Assert.Equal("Billing", attempts.Tags[MiniBusProcessingMetricTags.MiniBusEndpoint]);
+        Assert.Equal(typeof(TestCommand).FullName, attempts.Tags[MiniBusProcessingMetricTags.MiniBusMessageType]);
+        Assert.Equal(MiniBusProcessingOutcomes.Completed, attempts.Tags[MiniBusProcessingMetricTags.MiniBusProcessingOutcome]);
+
+        var duration = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingDurationInstrumentName);
+        Assert.Equal(MiniBusProcessingMetrics.DurationUnit, duration.Unit);
+        Assert.True((double)duration.Value >= 0);
+
+        Assert.DoesNotContain(attempts.Tags.Keys, key => key.Contains("message_id", StringComparison.Ordinal));
+        Assert.DoesNotContain(attempts.Tags.Keys, key => key.Contains("correlation_id", StringComparison.Ordinal));
+        Assert.DoesNotContain(attempts.Tags.Keys, key => key.Contains("causation_id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsRecoverabilityMetricsForRetryDelayedDeadLetterDuplicateAndFailure()
+    {
+        using var metrics = new RecordingMeterListener(MiniBusProcessingMetrics.MeterName);
+        var retryRecorder = new HandlerRecorder();
+        var retryProcessor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(retryRecorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, SucceedsOnSecondAttemptHandler>();
+            },
+            options => options.Recoverability.ImmediateRetries = 1);
+
+        await retryProcessor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            }),
+            new RecordingMessageActions());
+
+        var immediateRetry = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingRetriesInstrumentName
+            && (string?)measurement.Tags[MiniBusProcessingMetricTags.MiniBusRetryKind] == MiniBusProcessingRetryKinds.Immediate);
+        Assert.Equal(1L, immediateRetry.Value);
+
+        var sender = new RecordingSender();
+        var delayedProcessor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(new HandlerRecorder());
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+                RegisterTransport(services, sender, routes => routes.MapCommand<TestCommand>("billing-queue"));
+            },
+            options => options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10)));
+
+        await delayedProcessor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            }),
+            new RecordingMessageActions());
+
+        var delayedRetry = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingRetriesInstrumentName
+            && (string?)measurement.Tags[MiniBusProcessingMetricTags.MiniBusRetryKind] == MiniBusProcessingRetryKinds.Delayed);
+        Assert.Equal(1L, delayedRetry.Value);
+
+        var deadLetterProcessor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>();
+        });
+
+        await deadLetterProcessor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            }),
+            new RecordingMessageActions());
+
+        Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingDeadLettersInstrumentName);
+
+        var duplicateSession = new RecordingPersistenceSession { IsProcessed = true };
+        var duplicateProcessor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(duplicateSession));
+        });
+
+        await duplicateProcessor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            }),
+            new RecordingMessageActions());
+
+        Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingDuplicatesInstrumentName);
+
+        var failureProcessor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services => services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>(),
+            options => options.Recoverability.DeadLetterAfterRetriesExhausted = false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => failureProcessor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            })));
+
+        Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingFailuresInstrumentName);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsHandlerMetricsForEachHandler()
+    {
+        using var metrics = new RecordingMeterListener(MiniBusProcessingMetrics.MeterName);
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IHandleMessages<TestCommand>, SecondRecordingCommandHandler>();
+        });
+
+        await processor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        }));
+
+        var handlerDurations = metrics.Measurements
+            .Where(measurement => measurement.InstrumentName == MiniBusProcessingMetrics.HandlerDurationInstrumentName)
+            .ToArray();
+        Assert.Equal(2, handlerDurations.Length);
+        Assert.Contains(handlerDurations, measurement =>
+            (string?)measurement.Tags[MiniBusProcessingMetricTags.MiniBusHandlerType] == typeof(RecordingCommandHandler).FullName);
+        Assert.Contains(handlerDurations, measurement =>
+            (string?)measurement.Tags[MiniBusProcessingMetricTags.MiniBusHandlerType] == typeof(SecondRecordingCommandHandler).FullName);
+        Assert.All(handlerDurations, measurement =>
+        {
+            Assert.Equal(MiniBusProcessingMetricOutcomes.Completed, measurement.Tags[MiniBusProcessingMetricTags.MiniBusHandlerOutcome]);
+            Assert.True((double)measurement.Value >= 0);
+        });
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsSagaMetrics()
+    {
+        using var metrics = new RecordingMeterListener(MiniBusProcessingMetrics.MeterName);
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<CompletingSaga, BillingSagaData>();
+        var processor = CreateProcessor(new RecordingSerializer(new CompleteBillingSaga("billing-1")), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(persistence);
+            services.AddSingleton<SagaInvoker>();
+        }, options => options.EnableSagas = true);
+
+        await processor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(CompleteBillingSaga).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+        }));
+
+        var sagaDuration = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.SagaDurationInstrumentName);
+        Assert.Equal(typeof(CompletingSaga).FullName, sagaDuration.Tags[MiniBusProcessingMetricTags.MiniBusSagaType]);
+        Assert.Equal(MiniBusProcessingMetricOutcomes.Completed, sagaDuration.Tags[MiniBusProcessingMetricTags.MiniBusSagaOutcome]);
+        Assert.False(sagaDuration.Tags.ContainsKey("minibus.saga_correlation_id"));
+        Assert.False(sagaDuration.Tags.ContainsKey("minibus.correlation_id"));
+
+        var sagaCompletion = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.SagaCompletionsInstrumentName);
+        Assert.Equal(1L, sagaCompletion.Value);
     }
 
     [Fact]
@@ -1836,6 +2034,22 @@ public sealed class MiniBusProcessorTests
         }
     }
 
+    private sealed class SecondRecordingCommandHandler : IHandleMessages<TestCommand>
+    {
+        private readonly HandlerRecorder _recorder;
+
+        public SecondRecordingCommandHandler(HandlerRecorder recorder)
+        {
+            _recorder = recorder;
+        }
+
+        public Task Handle(TestCommand message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            _recorder.Invocations.Add(new Invocation(message, context));
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class ThrowingCommandHandler : IHandleMessages<TestCommand>
     {
         public Task Handle(TestCommand message, MiniBusContext context, CancellationToken cancellationToken)
@@ -2101,6 +2315,57 @@ public sealed class MiniBusProcessorTests
         {
             Schedules.Add((destination, message, scheduledEnqueueTime));
             return Task.FromResult(1L);
+        }
+    }
+
+    private sealed class RecordingMeterListener : IDisposable
+    {
+        private readonly HashSet<string> _meterNames;
+        private readonly MeterListener _listener = new();
+
+        public RecordingMeterListener(params string[] meterNames)
+        {
+            _meterNames = new HashSet<string>(meterNames, StringComparer.Ordinal);
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (_meterNames.Contains(instrument.Meter.Name))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            };
+            _listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+                Measurements.Add(RecordedMeasurement.Create(instrument, measurement, tags)));
+            _listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) =>
+                Measurements.Add(RecordedMeasurement.Create(instrument, measurement, tags)));
+            _listener.Start();
+        }
+
+        public List<RecordedMeasurement> Measurements { get; } = new();
+
+        public void Dispose()
+        {
+            _listener.Dispose();
+        }
+    }
+
+    private sealed record RecordedMeasurement(
+        string MeterName,
+        string InstrumentName,
+        string? Unit,
+        object Value,
+        IReadOnlyDictionary<string, object?> Tags)
+    {
+        public static RecordedMeasurement Create<T>(
+            Instrument instrument,
+            T value,
+            ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        {
+            return new RecordedMeasurement(
+                instrument.Meter.Name,
+                instrument.Name,
+                instrument.Unit,
+                value!,
+                tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value, StringComparer.Ordinal));
         }
     }
 }

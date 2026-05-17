@@ -7,17 +7,20 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
     private readonly IServiceProvider _serviceProvider;
     private readonly MiniBusProcessingLogger _processingLogger;
     private readonly MiniBusProcessingTracer _processingTracer;
+    private readonly MiniBusProcessingMetrics _processingMetrics;
     private readonly SagaInvoker? _sagaInvoker;
 
     public SagaInvocationBehavior(
         IServiceProvider serviceProvider,
         MiniBusProcessingLogger processingLogger,
         MiniBusProcessingTracer processingTracer,
+        MiniBusProcessingMetrics processingMetrics,
         SagaInvoker? sagaInvoker)
     {
         _serviceProvider = serviceProvider;
         _processingLogger = processingLogger;
         _processingTracer = processingTracer;
+        _processingMetrics = processingMetrics;
         _sagaInvoker = sagaInvoker;
     }
 
@@ -62,7 +65,8 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
                         _processingLogger.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
                         _processingTracer.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
                     }
-                })
+                },
+                (sagaType, _, invoke) => _processingMetrics.MeasureSagaInvocationAsync(context, sagaType, invoke))
             .ConfigureAwait(false);
 
         await next(context, cancellationToken).ConfigureAwait(false);

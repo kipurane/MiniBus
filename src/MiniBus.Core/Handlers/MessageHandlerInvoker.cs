@@ -11,7 +11,8 @@ public sealed class MessageHandlerInvoker
         MiniBusContext context,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default,
-        Action<Type>? handlerInvoked = null)
+        Action<Type>? handlerInvoked = null,
+        Func<Type, Func<Task>, Task>? handlerInvocation = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(context);
@@ -37,14 +38,28 @@ public sealed class MessageHandlerInvoker
                 continue;
             }
 
-            handlerInvoked?.Invoke(handler.GetType());
-            var invocationResult = handleMethod.Invoke(handler, new[] { message, context, cancellationToken });
-            if (invocationResult is not Task task)
+            var handlerType = handler.GetType();
+            handlerInvoked?.Invoke(handlerType);
+
+            async Task InvokeHandlerAsync()
             {
-                throw new InvalidOperationException($"Handler '{handler.GetType().FullName}' did not return a Task.");
+                var invocationResult = handleMethod.Invoke(handler, new[] { message, context, cancellationToken });
+                if (invocationResult is not Task task)
+                {
+                    throw new InvalidOperationException($"Handler '{handlerType.FullName}' did not return a Task.");
+                }
+
+                await task.ConfigureAwait(false);
             }
 
-            await task.ConfigureAwait(false);
+            if (handlerInvocation is null)
+            {
+                await InvokeHandlerAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                await handlerInvocation(handlerType, InvokeHandlerAsync).ConfigureAwait(false);
+            }
         }
     }
 }

@@ -60,6 +60,8 @@ internal sealed class MiniBusProcessingContext
 
     public Activity? ProcessingActivity { get; set; }
 
+    public MiniBusProcessingMetricAttempt? ProcessingMetricAttempt { get; set; }
+
     public bool IsShortCircuited { get; private set; }
 
     public void ShortCircuit()

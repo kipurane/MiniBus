@@ -28,6 +28,7 @@ public sealed class MiniBusProcessor
     private readonly DelayedRetryScheduler _delayedRetryScheduler;
     private readonly MiniBusProcessingLogger _processingLogger;
     private readonly MiniBusProcessingTracer _processingTracer;
+    private readonly MiniBusProcessingMetrics _processingMetrics;
 
     public MiniBusProcessor(
         IMessageSerializer serializer,
@@ -46,7 +47,15 @@ public sealed class MiniBusProcessor
         _recoverabilityDecisionMaker = recoverabilityDecisionMaker ?? new RecoverabilityDecisionMaker();
         _processingLogger = new MiniBusProcessingLogger(serviceProvider.GetService<ILoggerFactory>());
         _processingTracer = new MiniBusProcessingTracer();
-        _pipeline = CreatePipeline(serializer, handlerInvoker, serviceProvider, _processingLogger, _processingTracer, sagaInvoker);
+        _processingMetrics = new MiniBusProcessingMetrics();
+        _pipeline = CreatePipeline(
+            serializer,
+            handlerInvoker,
+            serviceProvider,
+            _processingLogger,
+            _processingTracer,
+            _processingMetrics,
+            sagaInvoker);
         _delayedRetryScheduler = new DelayedRetryScheduler(serviceProvider);
     }
 
@@ -115,6 +124,7 @@ public sealed class MiniBusProcessor
                     case RecoverabilityDecisionKind.ImmediateRetry:
                         _processingLogger.ProcessingRetried(context, exception);
                         _processingTracer.ProcessingRetried(context, exception);
+                        _processingMetrics.ProcessingRetried(context);
                         context = new MiniBusProcessingContext(message, _options, actions)
                         {
                             Headers = decision.Headers,
@@ -130,14 +140,16 @@ public sealed class MiniBusProcessor
                         }
                         catch (Exception ex) when (IsNotCallerRequestedCancellation(ex, cancellationToken))
                         {
-                            _processingLogger.ProcessingFailed(context, ex);
-                            _processingTracer.ProcessingFailed(context, ex);
-                            throw;
-                        }
+                        _processingLogger.ProcessingFailed(context, ex);
+                        _processingTracer.ProcessingFailed(context, ex);
+                        _processingMetrics.ProcessingFailed(context);
+                        throw;
+                    }
 
                         context.SettlementDecision = MiniBusSettlementDecision.Complete();
                         _processingLogger.ProcessingDelayedRetryScheduled(context);
                         _processingTracer.ProcessingDelayedRetryScheduled(context);
+                        _processingMetrics.ProcessingDelayedRetryScheduled(context);
                         await AuditAsync(
                                 context,
                                 MiniBusAuditProcessingOutcome.DelayedRetryScheduled,
@@ -157,6 +169,7 @@ public sealed class MiniBusProcessor
                             context,
                             context.SettlementDecision.DeadLetterReason,
                             context.SettlementDecision.DeadLetterDescription);
+                        _processingMetrics.ProcessingDeadLettered(context);
                         await AuditAsync(
                                 context,
                                 MiniBusAuditProcessingOutcome.DeadLettered,
@@ -170,6 +183,7 @@ public sealed class MiniBusProcessor
                     default:
                         _processingLogger.ProcessingFailed(context, exception);
                         _processingTracer.ProcessingFailed(context, exception);
+                        _processingMetrics.ProcessingFailed(context);
                         throw;
                 }
             }
@@ -179,6 +193,7 @@ public sealed class MiniBusProcessor
             {
                 _processingLogger.ProcessingFailed(context, exception);
                 _processingTracer.ProcessingFailed(context, exception);
+                _processingMetrics.ProcessingFailed(context);
                 throw;
             }
         }
@@ -207,6 +222,7 @@ public sealed class MiniBusProcessor
         {
             _processingLogger.ProcessingFailed(context, exception);
             _processingTracer.ProcessingFailed(context, exception);
+            _processingMetrics.ProcessingFailed(context);
             throw;
         }
     }
@@ -217,6 +233,7 @@ public sealed class MiniBusProcessor
         IServiceProvider serviceProvider,
         MiniBusProcessingLogger processingLogger,
         MiniBusProcessingTracer processingTracer,
+        MiniBusProcessingMetrics processingMetrics,
         SagaInvoker? sagaInvoker)
     {
         return new MiniBusProcessingPipeline(new IMiniBusProcessingBehavior[]
@@ -226,14 +243,15 @@ public sealed class MiniBusProcessor
             new ClaimCheckPayloadResolutionBehavior(serviceProvider),
             new MessageDeserializationBehavior(serializer),
             new HandlerContextBehavior(serviceProvider),
-            new HandlerInvocationBehavior(handlerInvoker, processingLogger, processingTracer, serviceProvider),
-            new SagaInvocationBehavior(serviceProvider, processingLogger, processingTracer, sagaInvoker)
+            new HandlerInvocationBehavior(handlerInvoker, processingLogger, processingTracer, processingMetrics, serviceProvider),
+            new SagaInvocationBehavior(serviceProvider, processingLogger, processingTracer, processingMetrics, sagaInvoker)
         });
     }
 
     private IDisposable BeginProcessingAttempt(MiniBusProcessingContext context)
     {
         var activity = _processingTracer.StartProcessingActivity(context);
+        context.ProcessingMetricAttempt = _processingMetrics.StartProcessingAttempt();
         var scope = _processingLogger.BeginProcessingScope(context);
         _processingLogger.ProcessingStarted(context);
         return new ProcessingAttemptScope(scope, activity);
@@ -254,11 +272,13 @@ public sealed class MiniBusProcessor
         {
             _processingLogger.ProcessingSkippedDuplicate(context);
             _processingTracer.ProcessingSkippedDuplicate(context);
+            _processingMetrics.ProcessingSkippedDuplicate(context);
             return;
         }
 
         _processingLogger.ProcessingCompleted(context);
         _processingTracer.ProcessingCompleted(context);
+        _processingMetrics.ProcessingCompleted(context);
     }
 
     private static async Task ApplySettlementAsync(

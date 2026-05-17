@@ -80,6 +80,33 @@ Processing activities use Azure messaging and MiniBus-specific tags when values 
 
 MiniBus records processing outcomes for completed messages, immediate retries, delayed retry scheduling, dead-lettering, duplicate inbox skips, propagated failures, saga completion, and outbox commits where the current pipeline has that context. Error status and exception tags are set for failed processing paths. When no listener is attached, tracing remains a no-op.
 
+## Processing metrics
+
+MiniBus emits provider-neutral metrics through `System.Diagnostics.Metrics`. Applications can export these instruments by configuring OpenTelemetry or another `MeterListener`-based pipeline in the host app; MiniBus does not reference the OpenTelemetry SDK, choose exporters, configure collectors, create dashboards, or require metrics to be enabled.
+
+The stable processing Meter name is `MiniBus.Processing`. SQL outbox dispatch metrics use the stable Meter name `MiniBus.Persistence.Sql`. Treat Meter names, instrument names, units, and tag names as observability contracts when configuring `AddMeter(...)`, dashboards, or alerts.
+
+Processing instruments:
+
+- `minibus.processing.attempts` with unit `{attempt}`
+- `minibus.processing.duration` with unit `s`
+- `minibus.processing.retries` with unit `{retry}`
+- `minibus.processing.dead_letters` with unit `{message}`
+- `minibus.processing.duplicates` with unit `{message}`
+- `minibus.processing.failures` with unit `{failure}`
+- `minibus.handler.duration` with unit `s`
+- `minibus.saga.duration` with unit `s`
+- `minibus.saga.completions` with unit `{saga}`
+
+SQL outbox dispatch instruments:
+
+- `minibus.sql_outbox.dispatch.batches` with unit `{batch}`
+- `minibus.sql_outbox.dispatch.batch_duration` with unit `s`
+- `minibus.sql_outbox.dispatch.operations` with unit `{operation}`
+- `minibus.sql_outbox.dispatch.operation_duration` with unit `s`
+
+Metric tags intentionally stay bounded for aggregation. Processing metrics use tags such as `minibus.endpoint`, `minibus.message_type`, `minibus.processing_outcome`, `minibus.retry_kind`, `minibus.handler_type`, `minibus.handler_outcome`, `minibus.saga_type`, and `minibus.saga_outcome`. SQL outbox metrics use `minibus.sql_outbox.dispatch_outcome` and `minibus.outbox_operation_kind` when operation kind is known. Metrics do not tag message id, correlation id, causation id, saga correlation id, SQL row id, outgoing transport message id, exception message, dead-letter description, or message body values.
+
 Minimal saga support uses core saga contracts and explicit correlation mappings:
 
 ```csharp

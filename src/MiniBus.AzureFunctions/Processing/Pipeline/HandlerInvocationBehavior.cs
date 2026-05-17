@@ -7,17 +7,20 @@ internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
     private readonly MessageHandlerInvoker _handlerInvoker;
     private readonly MiniBusProcessingLogger _processingLogger;
     private readonly MiniBusProcessingTracer _processingTracer;
+    private readonly MiniBusProcessingMetrics _processingMetrics;
     private readonly IServiceProvider _serviceProvider;
 
     public HandlerInvocationBehavior(
         MessageHandlerInvoker handlerInvoker,
         MiniBusProcessingLogger processingLogger,
         MiniBusProcessingTracer processingTracer,
+        MiniBusProcessingMetrics processingMetrics,
         IServiceProvider serviceProvider)
     {
         _handlerInvoker = handlerInvoker;
         _processingLogger = processingLogger;
         _processingTracer = processingTracer;
+        _processingMetrics = processingMetrics;
         _serviceProvider = serviceProvider;
     }
 
@@ -59,7 +62,8 @@ internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
                 context.HandlerContext,
                 _serviceProvider,
                 cancellationToken,
-                handlerInvoked)
+                handlerInvoked,
+                (handlerType, invoke) => _processingMetrics.MeasureHandlerInvocationAsync(context, handlerType, invoke))
             .ConfigureAwait(false);
 
         await next(context, cancellationToken).ConfigureAwait(false);

@@ -41,6 +41,7 @@ public static class MiniBusSqlPersistenceServiceCollectionExtensions
         services.AddSingleton(options);
         services.AddSingleton<SqlOutboxOperationSerializer>();
         services.AddSingleton<SqlSagaDataSerializer>();
+        services.AddSingleton<SqlMiniBusOutboxMetrics>();
         services.AddSingleton<IMiniBusPersistenceSessionFactory, SqlMiniBusPersistenceSessionFactory>();
         services.AddSingleton<ISqlMiniBusOutboxStore, SqlMiniBusOutboxStore>();
         services.AddSingleton<SqlMiniBusOutboxDispatcher>();

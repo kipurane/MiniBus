@@ -12,7 +12,8 @@ public sealed class SagaInvoker
         MiniBusContext context,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
-        Action<SagaInvocationDiagnostic>? sagaInvoked);
+        Action<SagaInvocationDiagnostic>? sagaInvoked,
+        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation);
 
     private static readonly System.Reflection.MethodInfo InvokeDefinitionCoreMethod =
         typeof(SagaInvoker)
@@ -34,7 +35,8 @@ public sealed class SagaInvoker
         MiniBusContext context,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default,
-        Action<SagaInvocationDiagnostic>? sagaInvoked = null)
+        Action<SagaInvocationDiagnostic>? sagaInvoked = null,
+        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(context);
@@ -49,7 +51,8 @@ public sealed class SagaInvoker
                     context,
                     serviceProvider,
                     cancellationToken,
-                    sagaInvoked)
+                    sagaInvoked,
+                    sagaInvocation)
                 .ConfigureAwait(false);
         }
     }
@@ -60,11 +63,12 @@ public sealed class SagaInvoker
         MiniBusContext context,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
-        Action<SagaInvocationDiagnostic>? sagaInvoked)
+        Action<SagaInvocationDiagnostic>? sagaInvoked,
+        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation)
     {
         var rule = ResolveRule(definition, message.GetType());
         var invoke = GetInvokeDelegate(definition.SagaType, definition.DataType, rule.MessageType);
-        return invoke(this, rule, message, context, serviceProvider, cancellationToken, sagaInvoked);
+        return invoke(this, rule, message, context, serviceProvider, cancellationToken, sagaInvoked, sagaInvocation);
     }
 
     private SagaInvocationDelegate GetInvokeDelegate(
@@ -91,7 +95,8 @@ public sealed class SagaInvoker
         MiniBusContext context,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
-        Action<SagaInvocationDiagnostic>? sagaInvoked)
+        Action<SagaInvocationDiagnostic>? sagaInvoked,
+        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation)
         where TSaga : MiniBusSaga<TData>, IHandleSagaMessages<TMessage>, new()
         where TData : class, ISagaData, new()
         where TMessage : IMessage
@@ -130,26 +135,34 @@ public sealed class SagaInvoker
         var saga = serviceProvider.GetService(typeof(TSaga)) as TSaga ?? new TSaga();
         saga.AttachData(data);
 
-        await saga.Handle(typedMessage, context, cancellationToken).ConfigureAwait(false);
-
-        if (isNew)
+        async Task<SagaInvocationDiagnostic> InvokeSagaAsync()
         {
-            await _persistence.CreateAsync(data, cancellationToken).ConfigureAwait(false);
+            await saga.Handle(typedMessage, context, cancellationToken).ConfigureAwait(false);
+
+            if (isNew)
+            {
+                await _persistence.CreateAsync(data, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (data.IsCompleted)
+            {
+                await _persistence.CompleteAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
+                return new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: true);
+            }
+
+            if (!isNew)
+            {
+                await _persistence.SaveAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
+            }
+
+            return new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: false);
         }
 
-        if (data.IsCompleted)
-        {
-            await _persistence.CompleteAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
-            sagaInvoked?.Invoke(new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: true));
-            return;
-        }
+        var diagnostic = sagaInvocation is null
+            ? await InvokeSagaAsync().ConfigureAwait(false)
+            : await sagaInvocation(typeof(TSaga), correlationId, InvokeSagaAsync).ConfigureAwait(false);
 
-        if (!isNew)
-        {
-            await _persistence.SaveAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
-        }
-
-        sagaInvoked?.Invoke(new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: false));
+        sagaInvoked?.Invoke(diagnostic);
     }
 
     private static SagaCorrelationRule ResolveRule(SagaDefinition definition, Type messageType)
