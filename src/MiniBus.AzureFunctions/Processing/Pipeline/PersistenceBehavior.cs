@@ -8,13 +8,16 @@ internal sealed class PersistenceBehavior : IMiniBusProcessingBehavior
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly MiniBusProcessingLogger _processingLogger;
+    private readonly MiniBusProcessingTracer _processingTracer;
 
     public PersistenceBehavior(
         IServiceProvider serviceProvider,
-        MiniBusProcessingLogger processingLogger)
+        MiniBusProcessingLogger processingLogger,
+        MiniBusProcessingTracer processingTracer)
     {
         _serviceProvider = serviceProvider;
         _processingLogger = processingLogger;
+        _processingTracer = processingTracer;
     }
 
     public async Task InvokeAsync(
@@ -63,6 +66,7 @@ internal sealed class PersistenceBehavior : IMiniBusProcessingBehavior
         }
 
         _processingLogger.OutboxCommitted(context);
+        _processingTracer.OutboxCommitted(context);
     }
 
     private IMiniBusPersistenceSessionFactory? GetPersistenceSessionFactory()

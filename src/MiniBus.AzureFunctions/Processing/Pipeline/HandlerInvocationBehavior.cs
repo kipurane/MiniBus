@@ -6,15 +6,18 @@ internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
 {
     private readonly MessageHandlerInvoker _handlerInvoker;
     private readonly MiniBusProcessingLogger _processingLogger;
+    private readonly MiniBusProcessingTracer _processingTracer;
     private readonly IServiceProvider _serviceProvider;
 
     public HandlerInvocationBehavior(
         MessageHandlerInvoker handlerInvoker,
         MiniBusProcessingLogger processingLogger,
+        MiniBusProcessingTracer processingTracer,
         IServiceProvider serviceProvider)
     {
         _handlerInvoker = handlerInvoker;
         _processingLogger = processingLogger;
+        _processingTracer = processingTracer;
         _serviceProvider = serviceProvider;
     }
 
@@ -33,8 +36,21 @@ internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
             throw new InvalidOperationException("MiniBus handler context must be created before handler invocation.");
         }
 
-        Action<Type>? handlerInvoked = _processingLogger.IsHandlerInvocationEnabled()
-            ? handlerType => _processingLogger.HandlerInvoked(context, handlerType)
+        var logHandlerInvoked = _processingLogger.IsHandlerInvocationEnabled();
+        var traceHandlerInvoked = context.ProcessingActivity is not null;
+        Action<Type>? handlerInvoked = logHandlerInvoked || traceHandlerInvoked
+            ? handlerType =>
+            {
+                if (logHandlerInvoked)
+                {
+                    _processingLogger.HandlerInvoked(context, handlerType);
+                }
+
+                if (traceHandlerInvoked)
+                {
+                    _processingTracer.HandlerInvoked(context, handlerType);
+                }
+            }
             : null;
 
         await _handlerInvoker

@@ -1,4 +1,5 @@
 using Azure.Messaging.ServiceBus;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MiniBus.AzureFunctions.DependencyInjection;
@@ -18,13 +19,304 @@ using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
-using Xunit;
 
 namespace MiniBus.AzureFunctions.Tests;
 
 public sealed class MiniBusProcessorTests
 {
     private static readonly TimeSpan DelayedRetryAssertionTolerance = TimeSpan.FromSeconds(2);
+
+    [Fact]
+    public async Task ProcessAsync_EmitsProcessingActivityWithCoreTags()
+    {
+        using var activities = new RecordingActivityListener();
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+            [MiniBusHeaderNames.CausationId] = "causation-1"
+        });
+
+        await processor.ProcessAsync(message, new RecordingMessageActions());
+
+        var activity = Assert.Single(activities.Activities);
+        Assert.Equal(MiniBusProcessingTracer.SourceName, activity.Source.Name);
+        Assert.Equal(MiniBusProcessingTracer.ProcessActivityName, activity.OperationName);
+        Assert.Equal(ActivityKind.Consumer, activity.Kind);
+        Assert.Equal(ActivityStatusCode.Unset, activity.Status);
+        Assert.Equal("azure_service_bus", GetTag(activity, MiniBusProcessingTraceTags.MessagingSystem));
+        Assert.Equal("Billing", GetTag(activity, MiniBusProcessingTraceTags.MiniBusEndpoint));
+        Assert.Equal(typeof(TestCommand).FullName, GetTag(activity, MiniBusProcessingTraceTags.MiniBusMessageType));
+        Assert.Equal("message-1", GetTag(activity, MiniBusProcessingTraceTags.MiniBusMessageId));
+        Assert.Equal("correlation-1", GetTag(activity, MiniBusProcessingTraceTags.MiniBusCorrelationId));
+        Assert.Equal("causation-1", GetTag(activity, MiniBusProcessingTraceTags.MiniBusCausationId));
+        Assert.Equal(MiniBusProcessingOutcomes.Completed, GetTag(activity, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+    }
+
+    [Fact]
+    public void StartProcessingActivity_IsNoopWithoutListener()
+    {
+        var tracer = new MiniBusProcessingTracer();
+        var context = new MiniBusProcessingContext(CreateMessage(), new MiniBusProcessorOptions());
+
+        using var activity = tracer.StartProcessingActivity(context);
+
+        Assert.Null(activity);
+        Assert.Null(context.ProcessingActivity);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_CompletesWithoutListener()
+    {
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        });
+
+        await processor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        }));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsSeparateActivitiesForImmediateRetryAttempts()
+    {
+        using var activities = new RecordingActivityListener();
+        var recorder = new HandlerRecorder();
+        var processor = CreateProcessor(
+            new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services =>
+            {
+                services.AddSingleton(recorder);
+                services.AddSingleton<IHandleMessages<TestCommand>, SucceedsOnSecondAttemptHandler>();
+            },
+            options => options.Recoverability.ImmediateRetries = 1);
+
+        await processor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+                [MiniBusHeaderNames.MessageId] = "message-1",
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+            }),
+            new RecordingMessageActions());
+
+        var attempts = activities.Activities.ToArray();
+        Assert.Equal(2, attempts.Length);
+        Assert.Equal(MiniBusProcessingOutcomes.Retried, GetTag(attempts[0], MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+        Assert.Equal("1", GetTag(attempts[0], MiniBusProcessingTraceTags.MiniBusRetryAttempt));
+        Assert.Contains(attempts[0].Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.Retried);
+        Assert.Equal(ActivityStatusCode.Unset, attempts[0].Status);
+        Assert.Equal(MiniBusProcessingOutcomes.Completed, GetTag(attempts[1], MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+        Assert.Equal("1", GetTag(attempts[1], MiniBusProcessingTraceTags.MiniBusRetryAttempt));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsTracingOutcomesForDelayedDeadLetterDuplicateAndFailure()
+    {
+        using (var delayedActivities = new RecordingActivityListener())
+        {
+            var sender = new RecordingSender();
+            var delayedProcessor = CreateProcessor(
+                new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+                services =>
+                {
+                    services.AddSingleton(new HandlerRecorder());
+                    services.AddSingleton<IHandleMessages<TestCommand>, RecordingThenThrowingCommandHandler>();
+                    RegisterTransport(services, sender, routes => routes.MapCommand<TestCommand>("billing-queue"));
+                },
+                options => options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10)));
+
+            await delayedProcessor.ProcessAsync(
+                CreateMessage(new Dictionary<string, object>
+                {
+                    [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+                    [MiniBusHeaderNames.MessageId] = "message-1"
+                }),
+                new RecordingMessageActions());
+
+            var delayed = Assert.Single(delayedActivities.Activities);
+            Assert.Equal(MiniBusProcessingOutcomes.DelayedRetryScheduled, GetTag(delayed, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+            Assert.Equal("1", GetTag(delayed, MiniBusProcessingTraceTags.MiniBusDelayedRetryAttempt));
+            Assert.Equal(ActivityStatusCode.Unset, delayed.Status);
+            Assert.Contains(delayed.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.DelayedRetryScheduled);
+        }
+
+        using (var deadLetterActivities = new RecordingActivityListener())
+        {
+            var deadLetterProcessor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+            {
+                services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>();
+            });
+
+            await deadLetterProcessor.ProcessAsync(
+                CreateMessage(new Dictionary<string, object>
+                {
+                    [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+                }),
+                new RecordingMessageActions());
+
+            var deadLetter = Assert.Single(deadLetterActivities.Activities);
+            Assert.Equal(MiniBusProcessingOutcomes.DeadLettered, GetTag(deadLetter, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+            Assert.Equal(RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason, GetTag(deadLetter, MiniBusProcessingTraceTags.MiniBusDeadLetterReason));
+            Assert.Equal(ActivityStatusCode.Error, deadLetter.Status);
+            Assert.Contains(deadLetter.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.DeadLettered);
+        }
+
+        using (var duplicateActivities = new RecordingActivityListener())
+        {
+            var session = new RecordingPersistenceSession { IsProcessed = true };
+            var duplicateProcessor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+            {
+                services.AddSingleton(new HandlerRecorder());
+                services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+                services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+            });
+
+            await duplicateProcessor.ProcessAsync(
+                CreateMessage(new Dictionary<string, object>
+                {
+                    [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+                    [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-message"
+                }),
+                new RecordingMessageActions());
+
+            var duplicate = Assert.Single(duplicateActivities.Activities);
+            Assert.Equal(MiniBusProcessingOutcomes.SkippedDuplicate, GetTag(duplicate, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+            Assert.Equal("original-message", GetTag(duplicate, MiniBusProcessingTraceTags.MiniBusMessageId));
+            Assert.Equal(ActivityStatusCode.Unset, duplicate.Status);
+            Assert.Contains(duplicate.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.SkippedDuplicate);
+        }
+
+        using (var failureActivities = new RecordingActivityListener())
+        {
+            var failureProcessor = CreateProcessor(
+                new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+                services =>
+                {
+                    services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>();
+                },
+                options => options.Recoverability.DeadLetterAfterRetriesExhausted = false);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => failureProcessor.ProcessAsync(CreateMessage(new Dictionary<string, object>
+                {
+                    [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+                })));
+
+            Assert.Equal("handler failed", exception.Message);
+            var failure = Assert.Single(failureActivities.Activities);
+            Assert.Equal(MiniBusProcessingOutcomes.Failed, GetTag(failure, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+            Assert.Equal(typeof(InvalidOperationException).FullName, GetTag(failure, MiniBusProcessingTraceTags.ExceptionType));
+            Assert.Equal("handler failed", GetTag(failure, MiniBusProcessingTraceTags.ExceptionMessage));
+            Assert.Equal(ActivityStatusCode.Error, failure.Status);
+            Assert.Contains(failure.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.Failed);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsHandlerSagaAndOutboxTraceEvents()
+    {
+        using var activities = new RecordingActivityListener();
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<CompletingSaga, BillingSagaData>();
+        var session = new RecordingPersistenceSession();
+        var sender = new RecordingSender();
+        var processor = CreateProcessor(new RecordingSerializer(new CompleteBillingSaga("billing-1")), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(persistence);
+            services.AddSingleton<SagaInvoker>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+            RegisterTransport(services, sender, routes =>
+                routes.MapScheduledMessage<BillingTimeout>("billing-timeouts"));
+        }, options => options.EnableSagas = true);
+
+        await processor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(CompleteBillingSaga).AssemblyQualifiedName!,
+                [MiniBusHeaderNames.MessageId] = "message-1",
+                [MiniBusHeaderNames.CorrelationId] = "correlation-1"
+            }),
+            new RecordingMessageActions());
+
+        var activity = Assert.Single(activities.Activities);
+        Assert.Contains(activity.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.SagaInvoked);
+        Assert.Contains(activity.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.SagaCompleted);
+        Assert.Equal(typeof(CompletingSaga).FullName, GetTag(activity, MiniBusProcessingTraceTags.MiniBusSagaType));
+        Assert.Equal("billing-1", GetTag(activity, MiniBusProcessingTraceTags.MiniBusSagaCorrelationId));
+
+        using var outboxActivities = new RecordingActivityListener();
+        var outboxSession = new RecordingPersistenceSession();
+        var outboxProcessor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, SendingCommandHandler>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(outboxSession));
+            RegisterTransport(services, sender, routes =>
+            {
+                routes.MapCommand<OutgoingCommand>("outgoing-command-queue");
+                routes.MapEvent<OutgoingEvent>("outgoing-events");
+                routes.MapScheduledMessage<OutgoingMessage>("scheduled-messages");
+            });
+        });
+
+        await outboxProcessor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+                [MiniBusHeaderNames.MessageId] = "message-2"
+            }),
+            new RecordingMessageActions());
+
+        var outboxActivity = Assert.Single(outboxActivities.Activities);
+        Assert.Contains(outboxActivity.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.HandlerInvoked);
+        Assert.Contains(outboxActivity.Events, activityEvent => activityEvent.Name == MiniBusProcessingTraceEvents.OutboxCommitted);
+        Assert.Equal(typeof(SendingCommandHandler).FullName, GetTag(outboxActivity, MiniBusProcessingTraceTags.MiniBusHandlerType));
+        Assert.Equal(3, GetTagObject(outboxActivity, MiniBusProcessingTraceTags.MiniBusOutboxOperationCount));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EmitsErrorActivityForAuditFailure()
+    {
+        using var activities = new RecordingActivityListener();
+        var auditWriter = new RecordingAuditWriter
+        {
+            Exception = new InvalidOperationException("audit failed")
+        };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(auditWriter);
+            services.AddSingleton<IMiniBusAuditWriter>(auditWriter);
+            services.AddSingleton(new HandlerRecorder());
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        });
+
+        var exception = await Assert.ThrowsAsync<MiniBusAuditWriteException>(
+            () => processor.ProcessAsync(
+                CreateMessage(new Dictionary<string, object>
+                {
+                    [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+                }),
+                new RecordingMessageActions()));
+
+        Assert.Equal("audit failed", exception.InnerException?.Message);
+        var activity = Assert.Single(activities.Activities);
+        Assert.Equal(MiniBusProcessingOutcomes.Failed, GetTag(activity, MiniBusProcessingTraceTags.MiniBusProcessingOutcome));
+        Assert.Equal(typeof(MiniBusAuditWriteException).FullName, GetTag(activity, MiniBusProcessingTraceTags.ExceptionType));
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+    }
 
     [Fact]
     public async Task ProcessAsync_EmitsStructuredStartScopeAndCompletionLogs()
@@ -729,7 +1021,7 @@ public sealed class MiniBusProcessorTests
             body: BinaryData.FromString("{\"claimCheck\":true}"),
             messageId: "sdk-message-id",
             correlationId: "sdk-correlation-id",
-            properties: CreateClaimCheckProperties("message-1", "correlation-1"));
+            properties: CreateClaimCheckProperties());
         var actions = new RecordingMessageActions();
 
         await processor.ProcessAsync(message, actions);
@@ -1340,6 +1632,26 @@ public sealed class MiniBusProcessorTests
             provider,
             options,
             sagaInvoker: provider.GetService<SagaInvoker>());
+    }
+
+    private static string? GetTag(
+        Activity activity,
+        string key)
+    {
+        return activity.Tags
+            .Where(tag => string.Equals(tag.Key, key, StringComparison.Ordinal))
+            .Select(tag => tag.Value)
+            .FirstOrDefault();
+    }
+
+    private static object? GetTagObject(
+        Activity activity,
+        string key)
+    {
+        return activity.TagObjects
+            .Where(tag => string.Equals(tag.Key, key, StringComparison.Ordinal))
+            .Select(tag => tag.Value)
+            .FirstOrDefault();
     }
 
     private static void RegisterTransport(

@@ -55,6 +55,31 @@ Each processing attempt creates a structured log scope after received headers ar
 
 Processing logs include attempt start, completion, duplicate inbox skips, immediate retry, delayed retry scheduling, dead-lettering, propagated failure, handler invocation, saga invocation/completion, and outbox commit diagnostics. These logs are provider-neutral and are intended to be usable today while leaving OpenTelemetry tracing and metrics as separate observability features.
 
+## OpenTelemetry processing traces
+
+MiniBus emits provider-neutral processing traces through `System.Diagnostics.ActivitySource`. Applications can export these activities by configuring OpenTelemetry or another `ActivityListener`-based pipeline in the host app; MiniBus does not reference the OpenTelemetry SDK, choose exporters, configure resources, or require tracing to be enabled.
+
+The stable ActivitySource name is `MiniBus.Processing` and the root processing activity name is `MiniBus.Process`. Treat both names as observability contracts when configuring `AddSource("MiniBus.Processing")` or log/trace filters.
+
+Processing activities use Azure messaging and MiniBus-specific tags when values are available:
+
+- `messaging.system`
+- `minibus.endpoint`
+- `minibus.message_type`
+- `minibus.message_id`
+- `minibus.correlation_id`
+- `minibus.causation_id`
+- `minibus.retry_attempt`
+- `minibus.delayed_retry_attempt`
+- `minibus.handler_type`
+- `minibus.saga_type`
+- `minibus.saga_correlation_id`
+- `minibus.processing_outcome`
+- `minibus.outbox_operation_count`
+- `minibus.dead_letter_reason`
+
+MiniBus records processing outcomes for completed messages, immediate retries, delayed retry scheduling, dead-lettering, duplicate inbox skips, propagated failures, saga completion, and outbox commits where the current pipeline has that context. Error status and exception tags are set for failed processing paths. When no listener is attached, tracing remains a no-op.
+
 Minimal saga support uses core saga contracts and explicit correlation mappings:
 
 ```csharp

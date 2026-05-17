@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Azure.Messaging.ServiceBus;
 using MiniBus.AzureFunctions.Settlement;
 using MiniBus.Core.Persistence;
@@ -56,6 +57,8 @@ internal sealed class MiniBusProcessingContext
     public Type? LastSagaType { get; set; }
 
     public string? LastSagaCorrelationId { get; set; }
+
+    public Activity? ProcessingActivity { get; set; }
 
     public bool IsShortCircuited { get; private set; }
 
