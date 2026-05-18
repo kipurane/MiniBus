@@ -9,6 +9,7 @@ using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
+using MiniBus.Persistence.Sql;
 using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.FunctionApp;
 using MiniBus.Samples.FunctionApp.Contracts;
@@ -114,7 +115,7 @@ public sealed class ReferenceSolutionAcceptanceTests
                 pair => pair.Value));
     }
 
-    private static bool HasMessageType<TMessage>(ServiceBusMessage message)
+    internal static bool HasMessageType<TMessage>(ServiceBusMessage message)
     {
         return message.ApplicationProperties.TryGetValue(MiniBusHeaderNames.MessageType, out var value)
                && value is string typeName
@@ -243,6 +244,60 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             FROM {database.SagaTableName};
             """);
         Assert.Equal(invoiceId, sagaCorrelationId);
+    }
+
+    [SqlServerFact]
+    public async Task Tier2_SqlBackedBillingWorkflow_DrainsOutboxThroughConfiguredTransport()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var sender = new ReferenceSolutionAcceptanceTests.RecordingServiceBusSender();
+        using var provider = BuildSqlBackedProvider(database, sender);
+        var processor = provider.GetRequiredService<MiniBusProcessor>();
+        var invoiceId = "invoice-sql-drain-1";
+        var customerId = "customer-sql-drain-1";
+        var commandActions = new ReferenceSolutionAcceptanceTests.RecordingMessageActions();
+
+        await processor.ProcessAsync(
+            ReferenceSolutionAcceptanceTests.CreateReceivedMessage(
+                new CreateInvoice(invoiceId, customerId, 123.45m),
+                messageId: "command-message-sql-drain-1",
+                correlationId: "billing-correlation-sql-drain-1"),
+            commandActions);
+
+        var eventActions = new ReferenceSolutionAcceptanceTests.RecordingMessageActions();
+        await processor.ProcessAsync(
+            ReferenceSolutionAcceptanceTests.CreateReceivedMessage(
+                new InvoiceCreated(invoiceId, customerId, 123.45m),
+                messageId: "event-message-sql-drain-1",
+                correlationId: "billing-correlation-sql-drain-1"),
+            eventActions);
+
+        Assert.NotNull(commandActions.CompletedMessage);
+        Assert.Null(commandActions.DeadLetteredMessage);
+        Assert.NotNull(eventActions.CompletedMessage);
+        Assert.Null(eventActions.DeadLetteredMessage);
+        Assert.Empty(sender.Sends);
+        Assert.Empty(sender.Schedules);
+        Assert.Equal(3, await database.CountRowsAsync(database.OutboxTableName));
+        Assert.Equal(3, await database.CountPendingOutboxRowsAsync());
+        Assert.Equal(0, await database.CountDispatchedOutboxRowsAsync());
+
+        var dispatcher = provider.GetRequiredService<SqlMiniBusOutboxDispatcher>();
+        var dispatched = await dispatcher.DispatchPendingAsync();
+
+        Assert.Equal(3, dispatched);
+        Assert.Contains(sender.Sends, send =>
+            send.Destination == "billing-receipts"
+            && ReferenceSolutionAcceptanceTests.HasMessageType<SendInvoiceReceipt>(send.Message));
+        Assert.Contains(sender.Sends, send =>
+            send.Destination == "domain-events"
+            && ReferenceSolutionAcceptanceTests.HasMessageType<InvoiceCreated>(send.Message));
+        var timeoutSchedule = Assert.Single(sender.Schedules, schedule =>
+            schedule.Destination == "billing-timeouts"
+            && ReferenceSolutionAcceptanceTests.HasMessageType<InvoicePaymentTimeout>(schedule.Message));
+        Assert.True(timeoutSchedule.ScheduledEnqueueTime > DateTimeOffset.UtcNow.AddDays(6));
+        Assert.Equal(3, await database.CountDispatchedOutboxRowsAsync());
+        Assert.Equal(0, await database.CountPendingOutboxRowsAsync());
     }
 
     private static ServiceProvider BuildSqlBackedProvider(
@@ -378,6 +433,16 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
 
+        public Task<int> CountPendingOutboxRowsAsync()
+        {
+            return CountRowsWhereAsync(OutboxTableName, "DispatchedUtc IS NULL");
+        }
+
+        public Task<int> CountDispatchedOutboxRowsAsync()
+        {
+            return CountRowsWhereAsync(OutboxTableName, "DispatchedUtc IS NOT NULL");
+        }
+
         public async Task<IReadOnlyList<string>> QueryStringsAsync(string commandText)
         {
             await using var connection = CreateConnection();
@@ -409,6 +474,15 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             }
 
             return (T)value;
+        }
+
+        private async Task<int> CountRowsWhereAsync(string tableName, string whereClause)
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE {whereClause};";
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
 
         public async Task ApplySchemaAsync()

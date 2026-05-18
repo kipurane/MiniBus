@@ -1242,7 +1242,7 @@ Saga timeout support now uses Service Bus scheduled messages, with SQL outbox ca
 - [x] Add cleanup and expiry policy for inbox/outbox records.
 - [x] Decide whether migrations are framework-owned or shipped as SQL scripts.
 - [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
-- [ ] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
+- [x] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
 
 ### 24.3 Saga follow-ups
 
