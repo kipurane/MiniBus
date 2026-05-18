@@ -1286,7 +1286,7 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 - [ ] Add an inventory or multi-endpoint sample.
 - [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
 - [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
-- [ ] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
+- [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
 ---
 
