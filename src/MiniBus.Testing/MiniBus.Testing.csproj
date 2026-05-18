@@ -5,6 +5,11 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Testing</PackageId>
+        <Title>MiniBus Testing</Title>
+        <Description>Lightweight dependency-free testing helpers for unit testing MiniBus handlers and saga handlers with a testable MiniBus context.</Description>
+        <PackageTags>minibus;testing;unit-testing;handlers;sagas;messaging</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

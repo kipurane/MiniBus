@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines SQL Server / Azure SQL persistence for durable MiniBus saga state, including storage isolation, schema scripts, load/create/save/complete behavior, optimistic concurrency, dependency injection registration, and verification.
-
 ## Requirements
 ### Requirement: SQL saga persistence package isolates storage dependencies
 MiniBus SHALL provide SQL Server / Azure SQL saga persistence in the SQL persistence package without requiring saga handlers or saga data classes to reference SQL client APIs.
@@ -114,3 +113,19 @@ MiniBus SHALL document SQL saga persistence setup and cover SQL saga persistence
 #### Scenario: Integration tests cover saga lifecycle
 - **WHEN** SQL Server-backed integration tests run through Testcontainers or a configured test connection string
 - **THEN** they verify schema creation, saga create, load, save, complete, duplicate create rejection, stale version rejection, and serialization behavior against SQL Server-compatible storage
+
+### Requirement: SQL saga persistence documentation is part of SQL setup
+MiniBus SQL persistence documentation SHALL describe SQL saga persistence as part of the current SQL package capability.
+
+#### Scenario: Developer reads SQL persistence documentation
+- **WHEN** a developer reads SQL persistence documentation
+- **THEN** it explains that SQL persistence can provide SQL-backed `ISagaPersistence` in addition to inbox and outbox behavior
+
+#### Scenario: Developer prepares database schema
+- **WHEN** a developer prepares a database for SQL saga persistence
+- **THEN** documentation directs them to apply the packaged SQL schema scripts in filename order, including the saga schema script
+
+#### Scenario: Developer configures saga processing
+- **WHEN** a developer reads SQL saga setup documentation
+- **THEN** it describes saga registration, SQL saga persistence registration, serialization expectations, completion behavior, and optimistic concurrency behavior
+

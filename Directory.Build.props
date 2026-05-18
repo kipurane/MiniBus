@@ -1,0 +1,24 @@
+<Project>
+  <PropertyGroup>
+    <Authors>MiniBus Contributors</Authors>
+    <Company>MiniBus Contributors</Company>
+    <Product>MiniBus</Product>
+    <PackageVersion>0.1.0-preview.1</PackageVersion>
+    <Version>$(PackageVersion)</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kipurane/MiniBus</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kipurane/MiniBus</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true' and Exists('README.md')">
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

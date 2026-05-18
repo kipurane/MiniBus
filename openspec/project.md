@@ -755,7 +755,7 @@ Current MVP status:
 
 - Core saga contracts, explicit correlation, saga invocation, and persistence abstractions exist.
 - `InMemorySagaPersistence` is intended for tests and samples only.
-- Production saga persistence is deferred until `MiniBus.Persistence.Sql` or another production persistence package exists.
+- Production SQL saga persistence exists in `MiniBus.Persistence.Sql`, with optimistic concurrency and explicit schema scripts.
 
 Initial saga abstraction:
 
@@ -1146,7 +1146,6 @@ Implement:
 
 Out of scope:
 
-- Production SQL saga persistence.
 - Saga timeout-specific APIs.
 - Service Bus sessions.
 
@@ -1280,12 +1279,12 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 - [ ] Add source generator for Azure Function wrappers.
 - [ ] Add Roslyn analyzers for common configuration and handler mistakes.
 - [ ] Add project templates.
-- [ ] Add package metadata and central build props before real NuGet publishing.
+- [x] Add package metadata and central build props before real NuGet publishing.
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
 - [ ] Expand the billing sample into a fuller runnable reference app once the remaining core production features are stable.
 - [ ] Add an inventory or multi-endpoint sample.
 - [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
-- [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
+- [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
 ---

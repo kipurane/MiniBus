@@ -1,6 +1,8 @@
 # MiniBus.AzureFunctions
 
-Manual Azure Functions isolated worker wrappers keep trigger declarations in the function app and delegate processing to `MiniBusProcessor`.
+`MiniBus.AzureFunctions` provides Azure Functions isolated worker integration for processing Azure Service Bus trigger messages through MiniBus.
+
+Manual Azure Functions wrappers are the current supported integration model. They keep static trigger declarations in the function app and delegate processing to `MiniBusProcessor`. Source-generated wrappers are planned future developer tooling, but manual wrappers remain supported because they are explicit and easy to debug.
 
 ```csharp
 using Azure.Messaging.ServiceBus;
@@ -30,7 +32,9 @@ public sealed class BillingInputFunction
 
 Handlers still implement `IHandleMessages<TMessage>` from `MiniBus.Core` and receive only the deserialized message, `MiniBusContext`, and `CancellationToken`.
 
-Recoverability is configured with the Azure Functions adapter registration:
+## Registration
+
+Register the Azure Functions adapter with endpoint and recoverability options:
 
 ```csharp
 services.AddMiniBusAzureFunctions(options =>
@@ -46,6 +50,25 @@ services.AddMiniBusAzureFunctions(options =>
 ```
 
 Immediate retries run inside the same `MiniBusProcessor` invocation. Delayed retries use Azure Service Bus scheduled message copies and preserve MiniBus correlation, original message id, retry, and exception headers.
+
+The adapter is normally paired with Azure Service Bus transport registrations:
+
+```csharp
+var routes = new AzureServiceBusTransportRoutes();
+routes.MapCommand<CreateInvoice>("billing-queue");
+routes.MapCommand<SendInvoiceReceipt>("billing-receipts");
+routes.MapEvent<InvoiceCreated>("domain-events");
+routes.MapScheduledMessage<InvoicePaymentTimeout>("billing-timeouts");
+
+services.AddSingleton(routes);
+services.AddSingleton<AzureServiceBusMessageFactory>();
+services.AddSingleton<AzureServiceBusTransportDispatcher>();
+services.AddSingleton(_ => new ServiceBusClient(serviceBusConnectionString));
+services.AddSingleton<IAzureServiceBusSender, AzureServiceBusSender>();
+services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDelayedRetryScheduler>();
+```
+
+Use `MiniBus.Persistence.Sql` when the endpoint needs SQL inbox/outbox/saga persistence, and `MiniBus.Persistence.AzureStorage` when it needs Blob-backed claim-check or audit behavior.
 
 ## Structured processing logs
 
@@ -147,7 +170,7 @@ services.AddSingleton<ISagaPersistence, InMemorySagaPersistence>();
 services.AddSingleton<SagaInvoker>();
 ```
 
-`AddMiniBusAzureFunctions` does not register `SagaRegistry` or `SagaInvoker` by default; saga processing is opt-in through `MiniBusProcessorOptions.EnableSagas`. It registers an `UnconfiguredSagaPersistence` placeholder so production apps must choose a real saga store explicitly. `InMemorySagaPersistence` is intended for tests and samples. Production SQL saga persistence is deferred.
+`AddMiniBusAzureFunctions` does not register `SagaRegistry` or `SagaInvoker` by default; saga processing is opt-in through `MiniBusProcessorOptions.EnableSagas`. It registers an `UnconfiguredSagaPersistence` placeholder so production apps must choose a real saga store explicitly. `InMemorySagaPersistence` is intended for tests and samples. Production SQL saga persistence is available from `MiniBus.Persistence.Sql`.
 
 ## SQL inbox and outbox persistence
 
@@ -177,11 +200,20 @@ services.AddMiniBusSqlPersistence(options =>
 });
 ```
 
-Run `src/MiniBus.Persistence.Sql/Schema/001-inbox-outbox.sql` before enabling the package. The schema creates `MiniBus.Inbox` for processed-message ids and `MiniBus.Outbox` for pending outgoing send, publish, and schedule operations.
+Run every script in `src/MiniBus.Persistence.Sql/Schema/` in filename order before enabling the package. The scripts create and evolve the default `MiniBus` SQL objects for inbox, outbox, deterministic outgoing message ids, and SQL saga state. If the application configures custom SQL schema or table names, adapt the packaged scripts through the application's normal database deployment process.
 
 When SQL persistence is registered, `MiniBusProcessor` checks the inbox before invoking handlers. Duplicate messages are completed without invoking handlers again. Successful processing commits the inbox record and captured outbox operations before completing the received Service Bus message. If the SQL commit fails, the message is not completed and the failure is propagated to the host.
 
 Outgoing operations are at-least-once. The SQL outbox dispatcher claims a bounded batch of pending operations, dispatches them through the configured transport, then marks successful rows dispatched. If a process exits after Service Bus accepts a message but before the row is marked dispatched, the operation can be sent again; receivers should keep idempotent handlers and inbox persistence enabled.
+
+```csharp
+var dispatcher = serviceProvider.GetRequiredService<SqlMiniBusOutboxDispatcher>();
+await dispatcher.DispatchPendingAsync(cancellationToken);
+```
+
+Outbox rows use deterministic outgoing message ids for replay-safe dispatch. Claimed rows become eligible for later dispatch after `OutboxClaimLeaseDuration` expires. SQL cleanup is explicit through application-owned maintenance code.
+
+When SQL persistence is registered and no custom saga persistence has already been registered, it also provides SQL-backed `ISagaPersistence`. Saga rows store serialized saga data, completion state, timestamps, and SQL Server rowversion metadata. Saves and completions use optimistic concurrency; stale updates fail with `SagaPersistenceException` and flow through normal recoverability.
 
 `MiniBus.Persistence.Sql.Tests` runs SQL Server-backed integration coverage through Testcontainers when Docker is available. The test fixture uses a pinned SQL Server 2022 Linux container image and requests `linux/amd64`, which lets Apple Silicon machines run it through Docker Desktop's amd64 emulation. If Docker is unavailable, those tests skip with a clear reason and the normal unit test run still passes. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` to run the same integration coverage against an external SQL Server/Azure SQL database instead of starting a container.
 

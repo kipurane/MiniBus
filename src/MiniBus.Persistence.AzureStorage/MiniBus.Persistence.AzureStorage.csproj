@@ -5,6 +5,11 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Persistence.AzureStorage</PackageId>
+        <Title>MiniBus Azure Storage Persistence</Title>
+        <Description>Azure Blob Storage persistence for MiniBus payload storage, large-payload claim-check behavior, and audit blob writing.</Description>
+        <PackageTags>minibus;azure-storage;blob-storage;claim-check;databus;audit;messaging</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

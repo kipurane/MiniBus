@@ -15,6 +15,9 @@ The goal is to hide repetitive messaging infrastructure concerns while keeping b
 - Basic recoverability with immediate retries, delayed retries, and dead-lettering.
 - Minimal saga abstractions with explicit correlation and in-memory persistence for tests and samples.
 - SQL Server/Azure SQL inbox, outbox, and saga persistence with connection-string setup, deterministic outbox replay ids, explicit schema scripts, and caller-provided `DbConnection` factory escape hatches.
+- Azure Blob Storage payload persistence, claim-check/DataBus behavior for large messages, and optional audit blobs.
+- Structured logs, OpenTelemetry-friendly processing traces, and provider-neutral processing/outbox metrics.
+- `MiniBus.Testing` helpers for direct handler and saga handler unit tests.
 
 ## Architecture
 
@@ -56,8 +59,37 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.AzureServiceBus`: Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
 - `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
 - `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
+- `src/MiniBus.Persistence.AzureStorage`: Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
+- `src/MiniBus.Testing`: lightweight direct handler and saga handler unit-testing helpers.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
+
+## Golden Path
+
+For an early Azure Functions + Azure Service Bus application, start with the package set that matches the runtime you want:
+
+```bash
+dotnet add package MiniBus.Core
+dotnet add package MiniBus.AzureServiceBus
+dotnet add package MiniBus.AzureFunctions
+dotnet add package MiniBus.Persistence.Sql
+dotnet add package MiniBus.Persistence.AzureStorage
+dotnet add package MiniBus.Testing
+```
+
+At the moment these packages are prepared for local pack verification; publishing to NuGet is still a project workflow step, not something this repository does automatically.
+
+1. Define message contracts with `ICommand`, `IEvent`, or `IMessage`.
+2. Implement handlers with `IHandleMessages<TMessage>` and depend on `MiniBusContext`, not Azure SDK or Functions trigger types.
+3. Register `AddMiniBusAzureFunctions` with endpoint, recoverability, and saga options.
+4. Register Azure Service Bus routes, `AzureServiceBusMessageFactory`, `AzureServiceBusTransportDispatcher`, `ServiceBusClient`, `IAzureServiceBusSender`, and delayed retry scheduling.
+5. Apply every script in `src/MiniBus.Persistence.Sql/Schema/` in filename order, then register `AddMiniBusSqlPersistence` if the endpoint needs SQL inbox/outbox/saga persistence.
+6. Run `SqlMiniBusOutboxDispatcher.DispatchPendingAsync` from an application-owned scheduled job, timer, or worker when SQL outbox dispatch should drain pending operations.
+7. Optionally register Azure Blob payload persistence, claim-check behavior, and audit blob writing.
+8. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
+9. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
+
+Manual Azure Functions wrappers are the current supported integration model. Source-generated wrappers, Roslyn analyzers, project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
 ## SQL Persistence
 
@@ -195,10 +227,11 @@ Useful commands:
 
 ```bash
 dotnet test --no-restore
+dotnet pack MiniBus.sln -c Release
 openspec status
 openspec list
 ```
 
 ## Status
 
-This is an early framework implementation. The core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, basic saga support, and SQL inbox/outbox/saga persistence foundation are in place. Production hardening remains planned around observability and developer tooling.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: generated Functions wrappers, analyzers, templates, fuller samples, live Azure integration coverage, and publishing automation.

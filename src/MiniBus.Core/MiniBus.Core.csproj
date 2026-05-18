@@ -5,6 +5,11 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Core</PackageId>
+        <Title>MiniBus Core</Title>
+        <Description>Core MiniBus message contracts, handler APIs, context, serialization, recoverability, saga abstractions, claim-check abstractions, auditing contracts, and persistence abstractions.</Description>
+        <PackageTags>minibus;messaging;service-bus;azure-functions;handlers;sagas</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

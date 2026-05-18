@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines developer testing helpers for unit testing MiniBus handlers and saga handlers without requiring Azure Functions, Azure Service Bus, SQL persistence, Azure Storage, or a real MiniBus processor host.
-
 ## Requirements
 ### Requirement: Testing package isolates handler tests from infrastructure
 MiniBus SHALL provide a `MiniBus.Testing` package for direct handler and saga handler unit tests without requiring Azure Functions, Azure Service Bus, SQL persistence, Azure Storage, OpenTelemetry, or test-framework-specific dependencies.
@@ -62,3 +61,19 @@ MiniBus SHALL document how to unit test a handler using `TestableMiniBusContext`
 #### Scenario: Documentation keeps scope clear
 - **WHEN** a developer reads the `MiniBus.Testing` package documentation
 - **THEN** it explains that the first package scope is direct handler and saga handler testing rather than Azure Functions processor, live transport, or SQL persistence integration testing
+
+### Requirement: Testing package documentation is included in the recommended developer workflow
+MiniBus documentation SHALL present `MiniBus.Testing` as the recommended direct handler and saga handler testing package for application developers.
+
+#### Scenario: Developer follows the golden path
+- **WHEN** a developer follows MiniBus getting-started or golden-path documentation
+- **THEN** it points to `MiniBus.Testing` for direct handler and saga handler unit tests
+
+#### Scenario: Developer chooses a testing level
+- **WHEN** a developer reads testing guidance
+- **THEN** it distinguishes direct handler tests using `MiniBus.Testing` from processor, transport, SQL persistence, Azure Storage, and live integration tests
+
+#### Scenario: Developer reads package documentation
+- **WHEN** a developer reads the `MiniBus.Testing` package README
+- **THEN** it shows creating `TestableMiniBusContext`, invoking a handler directly, and inspecting captured send, publish, or schedule operations
+

@@ -15,6 +15,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MiniBus.AzureFunctions</PackageId>
+    <Title>MiniBus Azure Functions Adapter</Title>
+    <Description>Azure Functions isolated worker adapter for processing Azure Service Bus trigger messages through MiniBus while keeping handlers independent from Functions and Azure SDK trigger types.</Description>
+    <PackageTags>minibus;azure-functions;azure-service-bus;isolated-worker;messaging</PackageTags>
   </PropertyGroup>
 
 </Project>

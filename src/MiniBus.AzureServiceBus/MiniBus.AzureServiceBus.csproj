@@ -12,6 +12,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MiniBus.AzureServiceBus</PackageId>
+    <Title>MiniBus Azure Service Bus Transport</Title>
+    <Description>Azure Service Bus transport support for MiniBus, including routed send, publish, scheduled dispatch, header mapping, and delayed retry scheduling.</Description>
+    <PackageTags>minibus;azure;service-bus;messaging;transport;scheduled-messages</PackageTags>
   </PropertyGroup>
 
 </Project>

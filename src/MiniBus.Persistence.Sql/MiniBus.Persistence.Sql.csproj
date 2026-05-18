@@ -5,6 +5,11 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Persistence.Sql</PackageId>
+        <Title>MiniBus SQL Persistence</Title>
+        <Description>SQL Server and Azure SQL persistence for MiniBus inbox, outbox, outbox dispatch, cleanup, and saga state.</Description>
+        <PackageTags>minibus;sql-server;azure-sql;outbox;inbox;sagas;messaging</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

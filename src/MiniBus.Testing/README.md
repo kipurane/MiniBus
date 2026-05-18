@@ -4,6 +4,15 @@
 
 The first helper is `TestableMiniBusContext`, a concrete `MiniBusContext` that exposes deterministic inbound metadata and captures outgoing `Send`, `Publish`, and `Schedule` calls.
 
+Use this package for direct application handler tests:
+
+- Handler business logic.
+- Saga handler behavior once saga data is arranged in memory.
+- Outgoing send, publish, and schedule assertions.
+- Header, endpoint, message id, correlation id, and causation id expectations.
+
+Use the runtime package test suites or application integration tests when you need to verify processor behavior, Azure Functions settlement, Azure Service Bus dispatch, SQL persistence, Azure Storage payloads, OpenTelemetry listeners, or live infrastructure.
+
 ## Handler example
 
 ```csharp
