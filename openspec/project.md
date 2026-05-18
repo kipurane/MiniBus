@@ -1242,6 +1242,7 @@ Saga timeout support now uses Service Bus scheduled messages, with SQL outbox ca
 - [x] Add cleanup and expiry policy for inbox/outbox records.
 - [x] Decide whether migrations are framework-owned or shipped as SQL scripts.
 - [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
+- [ ] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
 
 ### 24.3 Saga follow-ups
 
@@ -1279,9 +1280,11 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 - [ ] Add source generator for Azure Function wrappers.
 - [ ] Add Roslyn analyzers for common configuration and handler mistakes.
 - [ ] Add project templates.
+- [ ] Add package metadata and central build props before real NuGet publishing.
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
 - [ ] Expand the billing sample into a fuller runnable reference app once the remaining core production features are stable.
 - [ ] Add an inventory or multi-endpoint sample.
+- [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
 - [ ] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [ ] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
@@ -1298,8 +1301,6 @@ This list captures capabilities that may become valuable later but should not di
 - [ ] Add manual retry tooling or dashboard support.
 - [ ] Add optional Azure Table Storage inbox and saga persistence if MiniBus needs a SQL-free Azure Storage reliability mode for lightweight/serverless workloads.
 - [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
-- [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
-- [ ] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the recording transport receives the expected send, publish, and schedule operations.
 - [ ] Add an optional one-topic-per-event-type topology if the shared topic plus subscription filter model becomes too limiting.
 
 ---
