@@ -108,6 +108,109 @@ public sealed class ClaimCheckTests
         Assert.Contains("payload length", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ReferenceReader_IsClaimChecked_ReturnsFalseWhenHeaderAbsent()
+    {
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        Assert.False(MiniBusClaimCheckReferenceReader.IsClaimChecked(headers));
+    }
+
+    [Fact]
+    public void ReferenceReader_IsClaimChecked_ReturnsFalseWhenHeaderIsFalse()
+    {
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusClaimCheckHeaderNames.Enabled] = bool.FalseString
+        };
+
+        Assert.False(MiniBusClaimCheckReferenceReader.IsClaimChecked(headers));
+    }
+
+    [Fact]
+    public void ReferenceReader_IsClaimChecked_ReturnsTrueWhenHeaderIsTrue()
+    {
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusClaimCheckHeaderNames.Enabled] = bool.TrueString
+        };
+
+        Assert.True(MiniBusClaimCheckReferenceReader.IsClaimChecked(headers));
+    }
+
+    [Fact]
+    public void ReferenceReader_Read_ReturnsCompleteReferenceWithAllFields()
+    {
+        var createdUtc = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var expiresUtc = createdUtc.AddHours(24);
+        var headers = CreateClaimCheckHeaders();
+        headers[MiniBusClaimCheckHeaderNames.ExpiresUtc] = expiresUtc.ToString("O");
+        headers[MiniBusClaimCheckHeaderNames.ContentType] = "application/json";
+
+        var reference = MiniBusClaimCheckReferenceReader.Read(headers);
+
+        Assert.Equal(MiniBusClaimCheckProviderNames.AzureBlobStorage, reference.Provider);
+        Assert.Equal("minibus-payloads", reference.ContainerName);
+        Assert.Equal("payloads/2026/05/15/payload-1.bin", reference.BlobName);
+        Assert.Equal("payload-1", reference.PayloadId);
+        Assert.Equal(10, reference.Length);
+        Assert.Equal("application/json", reference.ContentType);
+        Assert.Equal(createdUtc, reference.CreatedUtc);
+        Assert.Equal(expiresUtc, reference.ExpiresUtc);
+    }
+
+    [Theory]
+    [InlineData(MiniBusClaimCheckHeaderNames.Provider)]
+    [InlineData(MiniBusClaimCheckHeaderNames.ContainerName)]
+    [InlineData(MiniBusClaimCheckHeaderNames.BlobName)]
+    [InlineData(MiniBusClaimCheckHeaderNames.PayloadId)]
+    [InlineData(MiniBusClaimCheckHeaderNames.PayloadLength)]
+    [InlineData(MiniBusClaimCheckHeaderNames.CreatedUtc)]
+    public void ReferenceReader_Read_ThrowsWhenRequiredHeaderIsMissing(string missingHeader)
+    {
+        var headers = CreateClaimCheckHeaders();
+        headers.Remove(missingHeader);
+
+        var exception = Assert.Throws<MiniBusInvalidClaimCheckReferenceException>(
+            () => MiniBusClaimCheckReferenceReader.Read(headers));
+
+        Assert.Contains(missingHeader, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceReader_Read_ThrowsWhenCreatedUtcIsInvalid()
+    {
+        var headers = CreateClaimCheckHeaders();
+        headers[MiniBusClaimCheckHeaderNames.CreatedUtc] = "not-a-date";
+
+        var exception = Assert.Throws<MiniBusInvalidClaimCheckReferenceException>(
+            () => MiniBusClaimCheckReferenceReader.Read(headers));
+
+        Assert.Contains("created UTC", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceReader_Read_ThrowsWhenExpiresUtcIsInvalid()
+    {
+        var headers = CreateClaimCheckHeaders();
+        headers[MiniBusClaimCheckHeaderNames.ExpiresUtc] = "not-a-date";
+
+        var exception = Assert.Throws<MiniBusInvalidClaimCheckReferenceException>(
+            () => MiniBusClaimCheckReferenceReader.Read(headers));
+
+        Assert.Contains("expires UTC", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceReader_Read_ReturnsNullExpiresUtcWhenHeaderAbsent()
+    {
+        var headers = CreateClaimCheckHeaders();
+
+        var reference = MiniBusClaimCheckReferenceReader.Read(headers);
+
+        Assert.Null(reference.ExpiresUtc);
+    }
+
     private static Dictionary<string, string> CreateClaimCheckHeaders()
     {
         return new Dictionary<string, string>(StringComparer.Ordinal)

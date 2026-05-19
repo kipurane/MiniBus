@@ -509,6 +509,123 @@ public sealed class AzureServiceBusTransportTests
         Assert.Empty(sender.Schedules);
     }
 
+    [Fact]
+    public void Routes_ThrowForConflictingEventRoute()
+    {
+        var routes = new AzureServiceBusTransportRoutes();
+        routes.MapEvent<TestEvent>("domain-events");
+
+        var exception = Assert.Throws<AzureServiceBusRouteConflictException>(
+            () => routes.MapEvent<TestEvent>("other-events"));
+
+        Assert.Equal(typeof(TestEvent), exception.MessageType);
+        Assert.Equal("domain-events", exception.ExistingDestination);
+        Assert.Equal("other-events", exception.RequestedDestination);
+    }
+
+    [Fact]
+    public void Routes_ThrowForMissingEventRoute()
+    {
+        var routes = new AzureServiceBusTransportRoutes();
+
+        var exception = Assert.Throws<AzureServiceBusRouteNotFoundException>(
+            () => routes.GetEventTopic(typeof(TestEvent)));
+
+        Assert.Equal(typeof(TestEvent), exception.MessageType);
+        Assert.Equal("publish", exception.Operation);
+    }
+
+    [Fact]
+    public void Routes_ThrowForMissingScheduledDestination()
+    {
+        var routes = new AzureServiceBusTransportRoutes();
+
+        var exception = Assert.Throws<AzureServiceBusRouteNotFoundException>(
+            () => routes.GetScheduledDestination(typeof(TestMessage)));
+
+        Assert.Equal(typeof(TestMessage), exception.MessageType);
+        Assert.Equal("schedule", exception.Operation);
+    }
+
+    [Fact]
+    public void HeaderMapper_AppliesHeadersToServiceBusMessage()
+    {
+        var message = new ServiceBusMessage(BinaryData.FromString("{}"));
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+            ["Custom"] = "custom-value"
+        };
+
+        AzureServiceBusHeaderMapper.ApplyHeaders(message, headers);
+
+        Assert.Equal("message-1", message.ApplicationProperties[MiniBusHeaderNames.MessageId]);
+        Assert.Equal("correlation-1", message.ApplicationProperties[MiniBusHeaderNames.CorrelationId]);
+        Assert.Equal("custom-value", message.ApplicationProperties["Custom"]);
+    }
+
+    [Fact]
+    public void HeaderMapper_ConvertsNullPropertyToEmptyString()
+    {
+        var properties = new Dictionary<string, object>
+        {
+            ["NullValue"] = null!
+        };
+
+        var headers = AzureServiceBusHeaderMapper.ReadHeaders(properties);
+
+        Assert.Equal(string.Empty, headers["NullValue"]);
+    }
+
+    [Fact]
+    public void HeaderMapper_ConvertsBoolPropertyToString()
+    {
+        var properties = new Dictionary<string, object>
+        {
+            ["TrueFlag"] = true,
+            ["FalseFlag"] = false
+        };
+
+        var headers = AzureServiceBusHeaderMapper.ReadHeaders(properties);
+
+        Assert.Equal("True", headers["TrueFlag"]);
+        Assert.Equal("False", headers["FalseFlag"]);
+    }
+
+    [Fact]
+    public void MessageFactory_ThrowsWhenMessageIsNotAssignableToType()
+    {
+        var factory = new AzureServiceBusMessageFactory(new RecordingSerializer());
+        var command = new TestCommand(Guid.NewGuid());
+
+        Assert.Throws<ArgumentException>(
+            () => factory.CreateMessage(command, typeof(TestEvent)));
+    }
+
+    [Fact]
+    public void MessageFactory_CreateMessageFromBinaryData_SetsBodyAndAppliesHeaders()
+    {
+        var factory = new AzureServiceBusMessageFactory(new RecordingSerializer());
+        var body = BinaryData.FromString("{\"id\":\"42\"}");
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusHeaderNames.MessageId] = "binary-message-1",
+            [MiniBusHeaderNames.CorrelationId] = "correlation-1",
+            [MiniBusHeaderNames.ContentType] = "application/json",
+            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+        };
+
+        var message = factory.CreateMessage(body, typeof(TestCommand), headers);
+
+        Assert.Equal("{\"id\":\"42\"}", message.Body.ToString());
+        Assert.Equal("binary-message-1", message.MessageId);
+        Assert.Equal("correlation-1", message.CorrelationId);
+        Assert.Equal("application/json", message.ContentType);
+        Assert.Equal(typeof(TestCommand).AssemblyQualifiedName, message.Subject);
+        Assert.Equal("binary-message-1", message.ApplicationProperties[MiniBusHeaderNames.MessageId]);
+    }
+
     private static AzureServiceBusTransportDispatcher CreateDispatcher(
         RecordingSender sender,
         Action<AzureServiceBusTransportRoutes>? configureRoutes = null,
