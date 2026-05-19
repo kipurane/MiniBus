@@ -260,6 +260,46 @@ public sealed class CoreMessageProcessingTests
             "transport-message-1"));
     }
 
+    [Fact]
+    public void RecoverabilityDecisionMaker_PropagatesWhenDeadLetterIsDisabled()
+    {
+        var options = new MiniBusRecoverabilityOptions
+        {
+            ImmediateRetries = 0,
+            DeadLetterAfterRetriesExhausted = false
+        };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.Propagate, decision.Kind);
+        Assert.Null(decision.DeadLetterReason);
+        Assert.Null(decision.DeadLetterDescription);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_PreservesExistingOriginalMessageId()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 1 };
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "the-original-message"
+        };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            headers,
+            options,
+            new InvalidOperationException("handler failed"),
+            "current-transport-message");
+
+        Assert.Equal("the-original-message", decision.Headers[MiniBusRecoverabilityHeaderNames.OriginalMessageId]);
+    }
+
     private sealed record TestMessage(Guid Id) : IMessage;
 
     private sealed record TestCommand(Guid Id) : ICommand;
