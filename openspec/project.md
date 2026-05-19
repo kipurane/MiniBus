@@ -1276,7 +1276,7 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 ### 24.6 Developer experience
 
-- [ ] Add source generator for Azure Function wrappers.
+- [x] Add source generator for Azure Function wrappers.
 - [ ] Add Roslyn analyzers for common configuration and handler mistakes.
 - [ ] Add project templates.
 - [x] Add package metadata and central build props before real NuGet publishing.

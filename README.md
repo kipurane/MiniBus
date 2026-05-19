@@ -18,6 +18,7 @@ The goal is to hide repetitive messaging infrastructure concerns while keeping b
 - Azure Blob Storage payload persistence, claim-check/DataBus behavior for large messages, and optional audit blobs.
 - Structured logs, OpenTelemetry-friendly processing traces, and provider-neutral processing/outbox metrics.
 - `MiniBus.Testing` helpers for direct handler and saga handler unit tests.
+- Optional source-generated Azure Functions Service Bus trigger wrappers that delegate to `MiniBusProcessor`.
 
 ## Architecture
 
@@ -61,6 +62,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
 - `src/MiniBus.Persistence.AzureStorage`: Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
 - `src/MiniBus.Testing`: lightweight direct handler and saga handler unit-testing helpers.
+- `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
@@ -75,6 +77,8 @@ dotnet add package MiniBus.AzureFunctions
 dotnet add package MiniBus.Persistence.Sql
 dotnet add package MiniBus.Persistence.AzureStorage
 dotnet add package MiniBus.Testing
+# Optional: generates thin Azure Functions Service Bus trigger wrappers
+dotnet add package MiniBus.AzureFunctions.SourceGenerators
 ```
 
 At the moment these packages are prepared for local pack verification; publishing to NuGet is still a project workflow step, not something this repository does automatically.
@@ -83,13 +87,14 @@ At the moment these packages are prepared for local pack verification; publishin
 2. Implement handlers with `IHandleMessages<TMessage>` and depend on `MiniBusContext`, not Azure SDK or Functions trigger types.
 3. Register `AddMiniBusAzureFunctions` with endpoint, recoverability, and saga options.
 4. Register Azure Service Bus routes, `AzureServiceBusMessageFactory`, `AzureServiceBusTransportDispatcher`, `ServiceBusClient`, `IAzureServiceBusSender`, and delayed retry scheduling.
-5. Apply every script in `src/MiniBus.Persistence.Sql/Schema/` in filename order, then register `AddMiniBusSqlPersistence` if the endpoint needs SQL inbox/outbox/saga persistence.
-6. Run `SqlMiniBusOutboxDispatcher.DispatchPendingAsync` from an application-owned scheduled job, timer, or worker when SQL outbox dispatch should drain pending operations.
-7. Optionally register Azure Blob payload persistence, claim-check behavior, and audit blob writing.
-8. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
-9. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
+5. Add manual Azure Functions wrappers or opt into generated wrappers with assembly-level trigger declarations.
+6. Apply every script in `src/MiniBus.Persistence.Sql/Schema/` in filename order, then register `AddMiniBusSqlPersistence` if the endpoint needs SQL inbox/outbox/saga persistence.
+7. Run `SqlMiniBusOutboxDispatcher.DispatchPendingAsync` from an application-owned scheduled job, timer, or worker when SQL outbox dispatch should drain pending operations.
+8. Optionally register Azure Blob payload persistence, claim-check behavior, and audit blob writing.
+9. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
+10. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
 
-Manual Azure Functions wrappers are the current supported integration model. Source-generated wrappers, Roslyn analyzers, project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
+Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; Roslyn analyzers beyond generator diagnostics, project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
 ## SQL Persistence
 
@@ -234,4 +239,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: generated Functions wrappers, analyzers, templates, fuller samples, live Azure integration coverage, and publishing automation.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: broader analyzers, templates, fuller samples, live Azure integration coverage, and publishing automation.

@@ -2,7 +2,7 @@
 
 `MiniBus.AzureFunctions` provides Azure Functions isolated worker integration for processing Azure Service Bus trigger messages through MiniBus.
 
-Manual Azure Functions wrappers are the current supported integration model. They keep static trigger declarations in the function app and delegate processing to `MiniBusProcessor`. Source-generated wrappers are planned future developer tooling, but manual wrappers remain supported because they are explicit and easy to debug.
+Manual Azure Functions wrappers remain a supported integration model. They keep static trigger declarations in the function app and delegate processing to `MiniBusProcessor`. Applications can also opt into source-generated wrappers through `MiniBus.AzureFunctions.SourceGenerators` when they want MiniBus to generate the repetitive wrapper class.
 
 ```csharp
 using Azure.Messaging.ServiceBus;
@@ -31,6 +31,29 @@ public sealed class BillingInputFunction
 ```
 
 Handlers still implement `IHandleMessages<TMessage>` from `MiniBus.Core` and receive only the deserialized message, `MiniBusContext`, and `CancellationToken`.
+
+## Generated wrappers
+
+`MiniBus.AzureFunctions.SourceGenerators` can generate the same thin wrapper shape from assembly-level declarations in the Function App project. The declaration attributes live in the reserved `MiniBus.AzureFunctions.SourceGenerators.Declarations` namespace and require explicit trigger metadata; there are no optional generated type-name overrides in this version.
+
+```csharp
+using MiniBus.AzureFunctions.SourceGenerators.Declarations;
+
+[assembly: MiniBusSourceGeneratedServiceBusQueueFunction(
+    functionName: "BillingInput",
+    queueName: "billing-queue",
+    connection: "ServiceBus")]
+
+[assembly: MiniBusSourceGeneratedServiceBusTopicFunction(
+    functionName: "BillingEvents",
+    topicName: "domain-events",
+    subscriptionName: "billing",
+    connection: "ServiceBus")]
+```
+
+The generated class is added to the consuming Function App assembly, injects `MiniBusProcessor`, and calls `ProcessAsync(ServiceBusReceivedMessage, ServiceBusMessageActions, CancellationToken)`. Manual wrappers and generated wrappers can coexist in the same app. The generator reports diagnostics for empty required values and duplicate generated function names.
+
+Generated wrapper types are emitted into the reserved `MiniBus.AzureFunctions.__Generated` namespace. Application code should not define its own types in either reserved source-generator namespace.
 
 ## Registration
 

@@ -3,6 +3,7 @@
 This sample is a minimal buildable Azure Functions-oriented project that shows the stable MiniBus setup path:
 
 - manual Service Bus trigger wrapper
+- optional source-generated Service Bus trigger wrapper declarations
 - `AddMiniBusAzureFunctions` registration
 - `SystemTextJsonMessageSerializer` registration
 - regular handler registration
@@ -23,6 +24,17 @@ The sample is intended to compile without provisioning Azure resources.
 `BillingInputFunction` expects a Service Bus trigger connection named `ServiceBus` and an input queue named `billing-queue` when run as a real Function App. `BillingEventsFunction` shows the matching event-processing wrapper for the `domain-events` route used by `InvoiceCreated`.
 
 `Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. The sample intentionally avoids owning the full Functions host executable until the project has a reusable host template.
+
+Manual wrappers remain the clearest sample default because the generated source is produced at build time. Applications that prefer generated wrappers can reference `MiniBus.AzureFunctions.SourceGenerators` and declare queue or topic/subscription inputs with assembly attributes:
+
+```csharp
+using MiniBus.AzureFunctions.SourceGenerators.Declarations;
+
+[assembly: MiniBusSourceGeneratedServiceBusQueueFunction("BillingInput", "billing-queue", "ServiceBus")]
+[assembly: MiniBusSourceGeneratedServiceBusTopicFunction("BillingEvents", "domain-events", "billing", "ServiceBus")]
+```
+
+The generated wrappers use the same `MiniBusProcessor.ProcessAsync` path as the manual `BillingInputFunction` and `BillingEventsFunction` classes. Keep manual wrappers when custom trigger code or especially explicit debugging is more useful than generated boilerplate.
 
 The registered `SampleServiceBusSender` is a placeholder that throws if outgoing dispatch is attempted. Replace it with `AzureServiceBusSender` backed by an Azure `ServiceBusClient` when connecting the sample to a real Service Bus namespace.
 

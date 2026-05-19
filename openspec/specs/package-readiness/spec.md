@@ -53,7 +53,7 @@ MiniBus SHALL provide a concise root documentation path for setting up an early 
 
 #### Scenario: Deferred tooling is described
 - **WHEN** a developer reads the setup documentation
-- **THEN** it clearly states that source generators, Roslyn analyzers, project templates, live Azure integration tests, and automatic infrastructure provisioning are future work
+- **THEN** it clearly states that source-generated wrappers are optional tooling and that broader Roslyn analyzers, project templates, live Azure integration tests, and automatic infrastructure provisioning are future work
 
 ### Requirement: Package readiness is locally verifiable
 MiniBus SHALL define local verification steps for package readiness before implementation is considered complete.
@@ -70,3 +70,17 @@ MiniBus SHALL define local verification steps for package readiness before imple
 - **WHEN** generated package artifacts are inspected
 - **THEN** the output contains only intended MiniBus packages and includes expected README and metadata
 
+### Requirement: Source generator package is distributable
+MiniBus SHALL define package metadata and package documentation for the Azure Functions source generator package when it is introduced as a distributable package.
+
+#### Scenario: Source generator package is packed
+- **WHEN** the Azure Functions source generator project is packed
+- **THEN** the generated package contains package metadata, README content, repository metadata, license metadata, and tags consistent with the other distributable MiniBus packages
+
+#### Scenario: Source generator package is consumed
+- **WHEN** a developer reads the source generator package README
+- **THEN** it explains how to reference the package, declare generated wrappers, and keep manual wrappers as a supported alternative
+
+#### Scenario: Runtime packages are packed
+- **WHEN** MiniBus runtime packages are packed
+- **THEN** they do not include Roslyn source generator implementation dependencies as runtime dependencies

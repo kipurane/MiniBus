@@ -293,18 +293,32 @@ The Azure Functions adapter SHALL preserve existing no-settlement and settlement
 - **WHEN** settlement-enabled processing runs without an audit writer
 - **THEN** MiniBus preserves existing completion, delayed retry scheduling, dead-lettering, duplicate inbox completion, persistence commit failure, and propagation behavior
 
-### Requirement: Azure Functions documentation identifies manual wrappers as current support
-MiniBus Azure Functions documentation SHALL describe manual Service Bus trigger wrappers as the current supported Azure Functions integration model and SHALL identify source-generated wrappers as future work.
+### Requirement: Azure Functions documentation identifies supported wrapper models
+MiniBus Azure Functions documentation SHALL describe manual Service Bus trigger wrappers as a supported Azure Functions integration model and SHALL describe source-generated wrappers as an optional integration model when the source generator package is referenced.
 
 #### Scenario: Developer reads Azure Functions adapter documentation
 - **WHEN** a developer reads the Azure Functions adapter documentation
 - **THEN** it shows a thin manual Azure Function wrapper using `ServiceBusTrigger` and delegating to `MiniBusProcessor.ProcessAsync`
 
-#### Scenario: Developer looks for generated wrappers
-- **WHEN** a developer reads the Azure Functions adapter documentation before source generation exists
-- **THEN** it states that source-generated wrappers are deferred and manual wrappers remain supported
+#### Scenario: Developer reads generated wrapper documentation
+- **WHEN** a developer reads Azure Functions adapter documentation after generated wrappers are available
+- **THEN** it shows how to declare generated wrappers and how to write the equivalent manual wrapper
+
+#### Scenario: Developer chooses not to use generation
+- **WHEN** a developer does not reference the source generator package
+- **THEN** the documentation still provides the manual wrapper setup path
 
 #### Scenario: Developer configures the adapter
 - **WHEN** a developer follows the Azure Functions adapter documentation
 - **THEN** it shows adapter registration, endpoint options, recoverability options, and the related transport/persistence registrations needed by the documented setup path
 
+### Requirement: Azure Functions adapter supports optional generated wrappers
+MiniBus Azure Functions integration SHALL support source-generated Service Bus trigger wrappers as an optional integration model that delegates to the existing `MiniBusProcessor` processing API.
+
+#### Scenario: Generated wrapper delegates to adapter processor
+- **WHEN** a generated Azure Functions Service Bus trigger wrapper receives a message
+- **THEN** it delegates processing and settlement to `MiniBusProcessor.ProcessAsync(ServiceBusReceivedMessage, ServiceBusMessageActions, CancellationToken)`
+
+#### Scenario: Manual wrapper remains supported
+- **WHEN** an application uses a manually written Azure Functions Service Bus trigger wrapper
+- **THEN** the wrapper remains a supported integration model and can delegate to the same `MiniBusProcessor` overloads
