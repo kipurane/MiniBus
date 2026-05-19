@@ -2,9 +2,10 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{5AB2733C-61E3-4E08-9A37-03783C1012D1}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{3F29613F-08CB-4FD6-BBD6-337B1EA83CB2}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "notes", "notes", "{3F29613F-08CB-4FD6-BBD6-337B1EA83CB2}"
 	ProjectSection(SolutionItems) = preProject
-		docs\updates.md = docs\updates.md
+		notes\updates.md = notes\updates.md
+		notes\retry_logic_comparison.md = notes\retry_logic_comparison.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "openspec", "openspec", "{E17AF261-83D9-41C7-8D4A-6E1BFB2784E9}"
