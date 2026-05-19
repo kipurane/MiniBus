@@ -140,11 +140,11 @@ public sealed class MiniBusProcessor
                         }
                         catch (Exception ex) when (IsNotCallerRequestedCancellation(ex, cancellationToken))
                         {
-                        _processingLogger.ProcessingFailed(context, ex);
-                        _processingTracer.ProcessingFailed(context, ex);
-                        _processingMetrics.ProcessingFailed(context);
-                        throw;
-                    }
+                            _processingLogger.ProcessingFailed(context, ex);
+                            _processingTracer.ProcessingFailed(context, ex);
+                            _processingMetrics.ProcessingFailed(context);
+                            throw;
+                        }
 
                         context.SettlementDecision = MiniBusSettlementDecision.Complete();
                         _processingLogger.ProcessingDelayedRetryScheduled(context);
@@ -243,8 +243,10 @@ public sealed class MiniBusProcessor
             new ClaimCheckPayloadResolutionBehavior(serviceProvider),
             new MessageDeserializationBehavior(serializer),
             new HandlerContextBehavior(serviceProvider),
-            new HandlerInvocationBehavior(handlerInvoker, processingLogger, processingTracer, processingMetrics, serviceProvider),
-            new SagaInvocationBehavior(serviceProvider, processingLogger, processingTracer, processingMetrics, sagaInvoker)
+            new HandlerInvocationBehavior(handlerInvoker, processingLogger, processingTracer, processingMetrics,
+                serviceProvider),
+            new SagaInvocationBehavior(serviceProvider, processingLogger, processingTracer, processingMetrics,
+                sagaInvoker)
         });
     }
 
@@ -299,7 +301,8 @@ public sealed class MiniBusProcessor
                 await context.Actions
                     .DeadLetterMessageAsync(
                         context.Message,
-                        context.SettlementDecision.DeadLetterReason ?? RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason,
+                        context.SettlementDecision.DeadLetterReason ??
+                        RecoverabilityDecisionMaker.RetriesExhaustedDeadLetterReason,
                         context.SettlementDecision.DeadLetterDescription,
                         cancellationToken)
                     .ConfigureAwait(false);
