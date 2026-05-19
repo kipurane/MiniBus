@@ -63,6 +63,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.Persistence.AzureStorage`: Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
 - `src/MiniBus.Testing`: lightweight direct handler and saga handler unit-testing helpers.
 - `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
+- `src/MiniBus.Analyzers`: optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
@@ -79,6 +80,8 @@ dotnet add package MiniBus.Persistence.AzureStorage
 dotnet add package MiniBus.Testing
 # Optional: generates thin Azure Functions Service Bus trigger wrappers
 dotnet add package MiniBus.AzureFunctions.SourceGenerators
+# Optional: compile-time guidance for common MiniBus mistakes
+dotnet add package MiniBus.Analyzers
 ```
 
 At the moment these packages are prepared for local pack verification; publishing to NuGet is still a project workflow step, not something this repository does automatically.
@@ -94,7 +97,7 @@ At the moment these packages are prepared for local pack verification; publishin
 9. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
 10. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
 
-Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; Roslyn analyzers beyond generator diagnostics, project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
+Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers. `MiniBus.Analyzers` provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes. Project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
 ## SQL Persistence
 
@@ -239,4 +242,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: broader analyzers, templates, fuller samples, live Azure integration coverage, and publishing automation.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: templates, fuller samples, live Azure integration coverage, and publishing automation.

@@ -225,7 +225,8 @@ using MiniBus.AzureFunctions.SourceGenerators.Declarations;
     {
         return Directory.EnumerateFiles(GetRepositoryRoot(), "*.csproj", SearchOption.AllDirectories)
             .Where(path => path.Contains($"{Path.DirectorySeparatorChar}src{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Where(path => !path.EndsWith("MiniBus.AzureFunctions.SourceGenerators.csproj", StringComparison.Ordinal));
+            .Where(path => !path.EndsWith("MiniBus.AzureFunctions.SourceGenerators.csproj", StringComparison.Ordinal))
+            .Where(path => !path.EndsWith("MiniBus.Analyzers.csproj", StringComparison.Ordinal));
     }
 
     private static IReadOnlyList<string> GetPackageReferenceNames(string projectFile)
