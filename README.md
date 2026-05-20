@@ -1,6 +1,6 @@
 # MiniBus
 
-MiniBus is a small Azure-native message-processing framework for .NET applications running on Azure Functions and Azure Service Bus. It takes inspiration from the most useful NServiceBus ideas, but keeps the implementation intentionally compact and explicit.
+MiniBus is a small Azure-native message-processing framework for .NET applications running on Azure Functions and Azure Service Bus. It mimics common patterns from similar message bus frameworks, but keeps the implementation intentionally compact and explicit.
 
 The goal is to hide repetitive messaging infrastructure concerns while keeping business handlers simple, testable, and independent from Azure SDK and Azure Functions trigger types.
 

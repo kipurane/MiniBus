@@ -10,7 +10,7 @@
 **Persistence options:** SQL Server / Azure SQL, Azure Storage Tables, Azure Blob Storage  
 **Development style:** OpenSpec-driven implementation with GitHub Copilot
 
-MiniBus is a lightweight message-processing framework inspired by the most useful ideas from NServiceBus. It is not intended to be a full clone. The goal is to provide a small, Azure-native framework for message-driven .NET applications running on Azure Functions with Azure Service Bus.
+MiniBus is a lightweight message-processing framework that mimics common patterns from similar message bus frameworks. It is not intended to be a full clone of any existing product. The goal is to provide a small, Azure-native framework for message-driven .NET applications running on Azure Functions with Azure Service Bus.
 
 The framework should hide repetitive messaging infrastructure concerns while keeping the application code simple, testable, and explicit.
 
@@ -31,7 +31,7 @@ MiniBus should provide:
 
 ## 2. Design intent
 
-MiniBus should mimic the spirit of NServiceBus, especially:
+MiniBus should mimic the spirit of common message-processing frameworks, especially:
 
 - Endpoint-oriented architecture.
 - Handler-based message processing.
@@ -1313,8 +1313,8 @@ MiniBus should not initially support:
 - Kafka.
 - MSMQ.
 - Distributed transactions.
-- Full NServiceBus compatibility.
-- Full saga DSL parity with NServiceBus.
+- Full compatibility with any existing message bus framework.
+- Full saga DSL parity with any existing message bus framework.
 - Graphical service control tooling.
 - Automatic Azure infrastructure provisioning.
 - Multi-tenant framework complexity.
@@ -1510,7 +1510,7 @@ Avoid broad prompts like:
 
 ```text
 Build MiniBus.
-Implement NServiceBus clone.
+Implement a clone of an existing message bus framework.
 Create the whole framework.
 ```
 
