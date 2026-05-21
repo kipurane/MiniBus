@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "MiniBus Contributors",
+  "classifications": [
+    "MiniBus",
+    "Azure Functions",
+    "Azure Service Bus"
+  ],
+  "identity": "MiniBus.Templates.AzureFunctions.ServiceBus",
+  "name": "MiniBus Azure Functions Service Bus App",
+  "shortName": "minibus-functionapp",
+  "sourceName": "MiniBus.FunctionApp.Template",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  }
+}

@@ -64,10 +64,27 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.Testing`: lightweight direct handler and saga handler unit-testing helpers.
 - `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - `src/MiniBus.Analyzers`: optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
+- `src/MiniBus.Templates`: `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
 - `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## Golden Path
+
+The first reusable project starter creates a complete Azure Functions isolated-worker host with manual Service Bus trigger code, MiniBus registration, starter contracts, one handler, routes, recoverability defaults, and generated-project notes:
+
+```bash
+dotnet new install MiniBus.Templates
+dotnet new minibus-functionapp -n Contoso.Orders.FunctionApp
+```
+
+MiniBus package publishing is still a local workflow step in this repository. To inspect the template package before publication, pack it and install the generated `.nupkg`:
+
+```bash
+dotnet pack src/MiniBus.Templates/MiniBus.Templates.csproj -c Release
+dotnet new install artifacts/packages/MiniBus.Templates.0.1.0-preview.1.nupkg
+```
+
+The template keeps Azure Service Bus credentials, queues, topics, subscriptions, deployment, and SQL reliability wiring application-owned. The manual setup path below remains useful when you want to assemble the registration yourself or study the underlying pieces.
 
 For an early Azure Functions + Azure Service Bus application, start with the package set that matches the runtime you want:
 
@@ -97,7 +114,7 @@ At the moment these packages are prepared for local pack verification; publishin
 9. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
 10. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
 
-Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers. `MiniBus.Analyzers` provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes. Project templates, live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
+Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers. `MiniBus.Analyzers` provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
 ## SQL Persistence
 
@@ -236,10 +253,11 @@ Useful commands:
 ```bash
 dotnet test --no-restore
 dotnet pack MiniBus.sln -c Release
+./eng/verify-templates.sh
 openspec status
 openspec list
 ```
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: templates, fuller samples, live Azure integration coverage, and publishing automation.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: fuller samples, live Azure integration coverage, and publishing automation.

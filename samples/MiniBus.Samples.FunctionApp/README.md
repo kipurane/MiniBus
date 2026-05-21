@@ -23,7 +23,7 @@ The sample is intended to compile without provisioning Azure resources.
 
 `BillingInputFunction` expects a Service Bus trigger connection named `ServiceBus` and an input queue named `billing-queue` when run as a real Function App. `BillingEventsFunction` shows the matching event-processing wrapper for the `domain-events` topic and `billing` subscription used by `InvoiceCreated`.
 
-`Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. The sample intentionally avoids owning the full Functions host executable until the project has a reusable host template.
+`Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. Start from the `minibus-functionapp` project template when you want a complete generated host; this sample stays focused on the reference registration and sample-code shape.
 
 Manual wrappers remain the clearest sample default because the generated source is produced at build time. Applications that prefer generated wrappers can reference `MiniBus.AzureFunctions.SourceGenerators` and declare queue or topic/subscription inputs with assembly attributes:
 

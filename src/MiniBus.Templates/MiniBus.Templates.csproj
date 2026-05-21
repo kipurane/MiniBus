@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <PackageId>MiniBus.Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <Title>MiniBus Templates</Title>
+    <Description>dotnet new templates for starting MiniBus Azure Functions applications.</Description>
+    <PackageTags>minibus;dotnet-new;templates;azure-functions;azure-service-bus;messaging</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="content/**/*" Exclude="content/**/bin/**;content/**/obj/**" Pack="true" PackagePath="content" />
+    <Compile Remove="content/**/*.cs" />
+  </ItemGroup>
+
+</Project>

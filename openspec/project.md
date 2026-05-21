@@ -1278,7 +1278,7 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 - [x] Add source generator for Azure Function wrappers.
 - [x] Add Roslyn analyzers for common configuration and handler mistakes.
-- [ ] Add project templates.
+- [x] Add project templates.
 - [x] Add package metadata and central build props before real NuGet publishing.
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
 - [ ] Expand the billing sample into a fuller runnable reference app once the remaining core production features are stable.
