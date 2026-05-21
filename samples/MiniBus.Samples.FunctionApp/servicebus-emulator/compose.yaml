@@ -1,0 +1,46 @@
+name: minibus-billing-servicebus-emulator
+
+services:
+  emulator:
+    container_name: minibus-billing-servicebus-emulator
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    pull_policy: always
+    volumes:
+      - "./Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json"
+    ports:
+      - "5672:5672"
+      - "5300:5300"
+    environment:
+      ACCEPT_EULA: "${ACCEPT_EULA:-N}"
+      EMULATOR_HTTP_PORT: 5300
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-MiniBusEmulator!123}"
+      SQL_SERVER: mssql
+    depends_on:
+      - mssql
+    networks:
+      sb-emulator:
+        aliases:
+          - "servicebus-emulator"
+
+  mssql:
+    container_name: minibus-billing-servicebus-emulator-sql
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "${ACCEPT_EULA:-N}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-MiniBusEmulator!123}"
+    networks:
+      sb-emulator:
+        aliases:
+          - "mssql"
+
+  azurite:
+    container_name: minibus-billing-functions-storage
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+
+networks:
+  sb-emulator:

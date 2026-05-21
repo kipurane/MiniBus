@@ -65,7 +65,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - `src/MiniBus.Analyzers`: optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
 - `src/MiniBus.Templates`: `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
-- `samples/MiniBus.Samples.FunctionApp`: buildable Functions-oriented sample showing MiniBus registration, a Service Bus trigger wrapper, handler code, routing, recoverability, and saga setup.
+- `samples/MiniBus.Samples.FunctionApp`: emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, and saga setup.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## Golden Path
@@ -260,4 +260,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: fuller samples, live Azure integration coverage, and publishing automation.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, the emulator-runnable Billing sample, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: fuller samples, live Azure integration coverage, and publishing automation.

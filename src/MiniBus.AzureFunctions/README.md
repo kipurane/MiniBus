@@ -93,6 +93,8 @@ services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDela
 
 Use `MiniBus.Persistence.Sql` when the endpoint needs SQL inbox/outbox/saga persistence, and `MiniBus.Persistence.AzureStorage` when it needs Blob-backed claim-check or audit behavior.
 
+For a runnable local Functions reference path, the Billing sample under `samples/MiniBus.Samples.FunctionApp` includes manual queue and topic/subscription wrappers, a repo-owned Azure Service Bus emulator topology, a command seed mode, and emulator-gated acceptance verification. The wrappers stay thin: Service Bus trigger arguments still flow directly into `MiniBusProcessor.ProcessAsync`.
+
 ## Structured processing logs
 
 MiniBus emits framework-level processing diagnostics through `Microsoft.Extensions.Logging`. Applications keep control of logging providers and sinks; MiniBus uses the host application's existing logging configuration and does not require a MiniBus-specific provider.

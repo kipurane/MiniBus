@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MiniBus.AzureFunctions.Processing;
@@ -19,6 +20,14 @@ namespace MiniBus.AcceptanceTests;
 
 public sealed class ReferenceSolutionAcceptanceTests
 {
+    [Theory]
+    [InlineData("seed")]
+    [InlineData("--seed")]
+    public void BillingSeedCommand_AcceptsDocumentedForms(string seedArgument)
+    {
+        Assert.True(BillingSampleSeeder.IsSeedCommand([seedArgument]));
+    }
+
     [Fact]
     public async Task Tier1_SampleStyleBillingWorkflow_ComposesWithoutInfrastructure()
     {
@@ -66,7 +75,7 @@ public sealed class ReferenceSolutionAcceptanceTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddBillingMiniBus();
+        services.AddBillingMiniBus(CreateBillingConfiguration());
         services.RemoveAll<IAzureServiceBusSender>();
         services.AddSingleton<IAzureServiceBusSender>(sender);
 
@@ -120,6 +129,17 @@ public sealed class ReferenceSolutionAcceptanceTests
         return message.ApplicationProperties.TryGetValue(MiniBusHeaderNames.MessageType, out var value)
                && value is string typeName
                && typeName.Contains(typeof(TMessage).FullName!, StringComparison.Ordinal);
+    }
+
+    internal static IConfiguration CreateBillingConfiguration(string? serviceBusConnectionString = null)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [BillingTopology.ServiceBusConnectionSetting] =
+                    serviceBusConnectionString ?? BillingTopology.EmulatorConnectionString
+            })
+            .Build();
     }
 
     internal sealed class RecordingServiceBusSender : IAzureServiceBusSender
@@ -306,7 +326,7 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddBillingMiniBus();
+        services.AddBillingMiniBus(ReferenceSolutionAcceptanceTests.CreateBillingConfiguration());
         services.RemoveAll<IAzureServiceBusSender>();
         services.RemoveAll<ISagaPersistence>();
         services.AddSingleton<IAzureServiceBusSender>(sender);

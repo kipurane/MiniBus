@@ -15,7 +15,7 @@ public sealed class BillingInputFunction
 
     [Function("BillingInput")]
     public Task Run(
-        [ServiceBusTrigger("billing-queue", Connection = "ServiceBus")]
+        [ServiceBusTrigger(BillingTopology.InputQueue, Connection = BillingTopology.ServiceBusConnectionSetting)]
         ServiceBusReceivedMessage message,
         ServiceBusMessageActions actions,
         CancellationToken cancellationToken)

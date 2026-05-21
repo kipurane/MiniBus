@@ -1,3 +1,5 @@
+using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniBus.AzureFunctions.DependencyInjection;
 using MiniBus.AzureServiceBus.Dispatching;
@@ -15,7 +17,9 @@ namespace MiniBus.Samples.FunctionApp;
 
 public static class MiniBusFunctionAppConfiguration
 {
-    public static IServiceCollection AddBillingMiniBus(this IServiceCollection services)
+    public static IServiceCollection AddBillingMiniBus(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
         services.AddMiniBusAzureFunctions(options =>
         {
@@ -34,7 +38,9 @@ public static class MiniBusFunctionAppConfiguration
         services.AddSingleton(CreateRoutes());
         services.AddSingleton<AzureServiceBusMessageFactory>();
         services.AddSingleton<AzureServiceBusTransportDispatcher>();
-        services.AddSingleton<IAzureServiceBusSender, SampleServiceBusSender>();
+        services.AddSingleton(_ => new ServiceBusClient(
+            BillingSampleServiceBusConnection.GetConnectionString(configuration)));
+        services.AddSingleton<IAzureServiceBusSender, BillingSampleServiceBusSender>();
         services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDelayedRetryScheduler>();
 
         var sagaRegistry = new SagaRegistry();
@@ -50,10 +56,10 @@ public static class MiniBusFunctionAppConfiguration
     {
         var routes = new AzureServiceBusTransportRoutes();
 
-        routes.MapCommand<CreateInvoice>("billing-queue");
-        routes.MapCommand<SendInvoiceReceipt>("billing-receipts");
-        routes.MapEvent<InvoiceCreated>("domain-events");
-        routes.MapScheduledMessage<InvoicePaymentTimeout>("billing-timeouts");
+        routes.MapCommand<CreateInvoice>(BillingTopology.InputQueue);
+        routes.MapCommand<SendInvoiceReceipt>(BillingTopology.ReceiptsQueue);
+        routes.MapEvent<InvoiceCreated>(BillingTopology.EventsTopic);
+        routes.MapScheduledMessage<InvoicePaymentTimeout>(BillingTopology.TimeoutsQueue);
 
         return routes;
     }

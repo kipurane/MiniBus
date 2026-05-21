@@ -15,7 +15,10 @@ public sealed class BillingEventsFunction
 
     [Function("BillingEvents")]
     public Task Run(
-        [ServiceBusTrigger("domain-events", "billing", Connection = "ServiceBus")]
+        [ServiceBusTrigger(
+            BillingTopology.EventsTopic,
+            BillingTopology.BillingSubscription,
+            Connection = BillingTopology.ServiceBusConnectionSetting)]
         ServiceBusReceivedMessage message,
         ServiceBusMessageActions actions,
         CancellationToken cancellationToken)
