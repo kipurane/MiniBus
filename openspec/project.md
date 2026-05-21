@@ -7,7 +7,7 @@
 **Primary runtime target:** .NET 10 with C# 10 language features  
 **Primary hosting model:** Azure Functions isolated worker  
 **Primary transport:** Azure Service Bus  
-**Persistence options:** SQL Server / Azure SQL, Azure Storage Tables, Azure Blob Storage  
+**Current persistence options:** SQL Server / Azure SQL, Azure Blob Storage<br>
 **Development style:** OpenSpec-driven implementation with GitHub Copilot
 
 MiniBus is a lightweight message-processing framework that mimics common patterns from similar message bus frameworks. It is not intended to be a full clone of any existing product. The goal is to provide a small, Azure-native framework for message-driven .NET applications running on Azure Functions with Azure Service Bus.
@@ -133,7 +133,7 @@ Complete, abandon, defer, schedule retry, or dead-letter
 
 ## 5. Project/package layout
 
-Target solution structure. The current MVP contains the core, Azure Service Bus, Azure Functions, and test projects; persistence, observability, testing helpers, and additional samples are planned phases.
+Target solution structure. The current implementation includes the core, Azure Service Bus, Azure Functions, SQL persistence, Azure Storage persistence, observability, testing helpers, and the buildable Function App sample. Additional samples and deferred persistence options remain planned work.
 
 ```text
 MiniBus.sln

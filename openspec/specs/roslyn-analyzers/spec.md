@@ -1,4 +1,9 @@
-## ADDED Requirements
+# roslyn-analyzers Specification
+
+## Purpose
+Defines compile-time analyzer diagnostics for common MiniBus configuration, routing, handler, message contract, and feasible saga mistakes.
+
+## Requirements
 
 ### Requirement: Analyzer package is distributed separately
 MiniBus SHALL provide a dedicated Roslyn analyzer package for compile-time MiniBus diagnostics without adding Roslyn dependencies to MiniBus runtime packages.

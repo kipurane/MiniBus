@@ -1,7 +1,8 @@
 # package-readiness Specification
 
 ## Purpose
-TBD - created by archiving change nuget-ready-dx-polish. Update Purpose after archive.
+Defines the package metadata, packaged README coverage, root golden-path documentation, and local verification expectations for early MiniBus distribution readiness.
+
 ## Requirements
 ### Requirement: Distributable projects define consistent NuGet metadata
 MiniBus SHALL provide consistent NuGet package metadata for each distributable project under `src/`.
@@ -53,7 +54,7 @@ MiniBus SHALL provide a concise root documentation path for setting up an early 
 
 #### Scenario: Deferred tooling is described
 - **WHEN** a developer reads the setup documentation
-- **THEN** it clearly states that source-generated wrappers are optional tooling and that broader Roslyn analyzers, project templates, live Azure integration tests, and automatic infrastructure provisioning are future work
+- **THEN** it clearly states that source-generated wrappers and Roslyn analyzers are optional tooling and that project templates, live Azure integration tests, and automatic infrastructure provisioning are future work
 
 ### Requirement: Package readiness is locally verifiable
 MiniBus SHALL define local verification steps for package readiness before implementation is considered complete.

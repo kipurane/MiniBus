@@ -28,4 +28,4 @@ services.AddSingleton<IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDela
 
 Routes are explicit. A missing route fails dispatch instead of guessing a destination. Applications remain responsible for creating Azure Service Bus queues, topics, subscriptions, and any duplicate-detection settings they need.
 
-Source generators, topology provisioning, live Azure integration tests, and one-topic-per-event-type topology helpers are future work.
+Azure Functions source-generated trigger wrappers live in the optional `MiniBus.AzureFunctions.SourceGenerators` package. Topology provisioning, live Azure integration tests, and one-topic-per-event-type topology helpers are future work.
