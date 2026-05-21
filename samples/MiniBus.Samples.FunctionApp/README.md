@@ -21,7 +21,7 @@ The sample is intended to compile without provisioning Azure resources.
 
 ## Configuration Notes
 
-`BillingInputFunction` expects a Service Bus trigger connection named `ServiceBus` and an input queue named `billing-queue` when run as a real Function App. `BillingEventsFunction` shows the matching event-processing wrapper for the `domain-events` route used by `InvoiceCreated`.
+`BillingInputFunction` expects a Service Bus trigger connection named `ServiceBus` and an input queue named `billing-queue` when run as a real Function App. `BillingEventsFunction` shows the matching event-processing wrapper for the `domain-events` topic and `billing` subscription used by `InvoiceCreated`.
 
 `Program.ConfigureServices` shows the service registration that a real isolated worker host would call from its startup path. The sample intentionally avoids owning the full Functions host executable until the project has a reusable host template.
 

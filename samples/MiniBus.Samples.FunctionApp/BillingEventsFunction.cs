@@ -15,7 +15,7 @@ public sealed class BillingEventsFunction
 
     [Function("BillingEvents")]
     public Task Run(
-        [ServiceBusTrigger("domain-events", Connection = "ServiceBus")]
+        [ServiceBusTrigger("domain-events", "billing", Connection = "ServiceBus")]
         ServiceBusReceivedMessage message,
         ServiceBusMessageActions actions,
         CancellationToken cancellationToken)

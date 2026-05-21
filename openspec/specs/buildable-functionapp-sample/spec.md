@@ -15,12 +15,12 @@ MiniBus SHALL provide a buildable Azure Functions isolated worker sample project
 - **WHEN** a developer opens `MiniBus.sln`
 - **THEN** the Function App sample appears as a project rather than only loose solution items
 
-### Requirement: Sample demonstrates host registration
-The Function App sample SHALL show a minimal host startup path for registering MiniBus and Azure Functions isolated worker services.
+### Requirement: Sample demonstrates host registration hook
+The Function App sample SHALL show the service-registration path a real Azure Functions isolated worker host or reusable project template can call to register MiniBus.
 
 #### Scenario: Developer inspects sample startup
 - **WHEN** a developer reads the sample startup code
-- **THEN** it shows Azure Functions worker registration and MiniBus service registration in one coherent setup path
+- **THEN** it shows a coherent MiniBus service-registration hook without requiring the sample to own a full Functions host executable
 
 ### Requirement: Sample demonstrates MiniBus processing registration
 The Function App sample SHALL demonstrate registration for MiniBus Azure Functions processing, message serialization, handlers, recoverability options, and saga services when saga code is included.
@@ -48,4 +48,4 @@ The Function App sample SHALL document how to build or inspect the sample and cl
 
 #### Scenario: Developer reads sample documentation
 - **WHEN** a developer opens the sample documentation
-- **THEN** it explains required local configuration placeholders, build commands, and that live Azure resources and first-class SQL Server persistence setup are outside this sample
+- **THEN** it explains required local configuration placeholders, build commands, and that live Azure resources and active SQL persistence wiring are outside this minimal sample
