@@ -1276,14 +1276,16 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 ### 24.6 Developer experience
 
+The next sample increment should prefer a local Azure Service Bus emulator path for a runnable reference workflow. Live Azure Service Bus coverage should remain a separate proof layer after the emulator-backed workflow shape is useful and stable.
+
 - [x] Add source generator for Azure Function wrappers.
 - [x] Add Roslyn analyzers for common configuration and handler mistakes.
 - [x] Add project templates.
 - [x] Add package metadata and central build props before real NuGet publishing.
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
-- [ ] Expand the billing sample into a fuller runnable reference app once the remaining core production features are stable.
-- [ ] Add an inventory or multi-endpoint sample.
-- [ ] Add live Azure Service Bus integration tests once reusable infrastructure exists.
+- [ ] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
+- [ ] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
+- [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
