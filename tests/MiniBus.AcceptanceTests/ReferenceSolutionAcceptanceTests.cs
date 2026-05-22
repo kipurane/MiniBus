@@ -131,14 +131,31 @@ public sealed class ReferenceSolutionAcceptanceTests
                && typeName.Contains(typeof(TMessage).FullName!, StringComparison.Ordinal);
     }
 
-    internal static IConfiguration CreateBillingConfiguration(string? serviceBusConnectionString = null)
+    internal static IConfiguration CreateBillingConfiguration(
+        string? serviceBusConnectionString = null,
+        string? billingSqlConnectionString = null,
+        string? billingSqlSchemaName = null)
     {
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
+        {
+            [BillingTopology.ServiceBusConnectionSetting] =
+                serviceBusConnectionString ?? BillingTopology.EmulatorConnectionString,
+            [BillingSampleSqlPersistence.EnabledSetting] =
+                (!string.IsNullOrWhiteSpace(billingSqlConnectionString)).ToString()
+        };
+
+        if (!string.IsNullOrWhiteSpace(billingSqlConnectionString))
+        {
+            settings[BillingSampleSqlPersistence.ConnectionSetting] = billingSqlConnectionString;
+
+            if (!string.IsNullOrWhiteSpace(billingSqlSchemaName))
             {
-                [BillingTopology.ServiceBusConnectionSetting] =
-                    serviceBusConnectionString ?? BillingTopology.EmulatorConnectionString
-            })
+                settings[BillingSampleSqlPersistence.SchemaSetting] = billingSqlSchemaName;
+            }
+        }
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(settings)
             .Build();
     }
 
@@ -320,29 +337,80 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
         Assert.Equal(0, await database.CountPendingOutboxRowsAsync());
     }
 
+    [SqlServerFact]
+    public async Task Tier2_SqlBackedBillingWorkflow_SkipsDuplicateInboxMessages()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var sender = new ReferenceSolutionAcceptanceTests.RecordingServiceBusSender();
+        using var provider = BuildSqlBackedProvider(database, sender);
+        var processor = provider.GetRequiredService<MiniBusProcessor>();
+        var invoiceId = "invoice-sql-duplicate-1";
+        var customerId = "customer-sql-duplicate-1";
+
+        await ProcessAsync(
+            processor,
+            new CreateInvoice(invoiceId, customerId, 123.45m),
+            messageId: "command-message-sql-duplicate-1",
+            correlationId: "billing-correlation-sql-duplicate-1");
+        await ProcessAsync(
+            processor,
+            new CreateInvoice(invoiceId, customerId, 123.45m),
+            messageId: "command-message-sql-duplicate-1",
+            correlationId: "billing-correlation-sql-duplicate-1");
+        await ProcessAsync(
+            processor,
+            new InvoiceCreated(invoiceId, customerId, 123.45m),
+            messageId: "event-message-sql-duplicate-1",
+            correlationId: "billing-correlation-sql-duplicate-1");
+        await ProcessAsync(
+            processor,
+            new InvoiceCreated(invoiceId, customerId, 123.45m),
+            messageId: "event-message-sql-duplicate-1",
+            correlationId: "billing-correlation-sql-duplicate-1");
+
+        Assert.Equal(2, await database.CountRowsAsync(database.InboxTableName));
+        Assert.Equal(3, await database.CountRowsAsync(database.OutboxTableName));
+        Assert.Equal(1, await database.CountRowsAsync(database.SagaTableName));
+        Assert.Empty(sender.Sends);
+        Assert.Empty(sender.Schedules);
+    }
+
     private static ServiceProvider BuildSqlBackedProvider(
         SqlServerTestDatabase database,
         ReferenceSolutionAcceptanceTests.RecordingServiceBusSender sender)
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddBillingMiniBus(ReferenceSolutionAcceptanceTests.CreateBillingConfiguration());
+        services.AddBillingMiniBus(ReferenceSolutionAcceptanceTests.CreateBillingConfiguration(
+            billingSqlConnectionString: database.ConnectionString,
+            billingSqlSchemaName: database.SchemaName));
         services.RemoveAll<IAzureServiceBusSender>();
-        services.RemoveAll<ISagaPersistence>();
         services.AddSingleton<IAzureServiceBusSender>(sender);
-        services.AddSingleton<IMiniBusOutboxDispatcher>(
-            serviceProvider => serviceProvider.GetRequiredService<AzureServiceBusTransportDispatcher>());
-        services.AddMiniBusSqlPersistence(options =>
-        {
-            options.SchemaName = database.SchemaName;
-            options.ConnectionFactory = database.CreateConnection;
-        });
 
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateOnBuild = true,
             ValidateScopes = true
         });
+    }
+
+    private static async Task ProcessAsync<TMessage>(
+        MiniBusProcessor processor,
+        TMessage message,
+        string messageId,
+        string correlationId)
+    {
+        var actions = new ReferenceSolutionAcceptanceTests.RecordingMessageActions();
+
+        await processor.ProcessAsync(
+            ReferenceSolutionAcceptanceTests.CreateReceivedMessage(
+                message,
+                messageId,
+                correlationId),
+            actions);
+
+        Assert.NotNull(actions.CompletedMessage);
+        Assert.Null(actions.DeadLetteredMessage);
     }
 
     public sealed class SqlServerFixture : IAsyncLifetime

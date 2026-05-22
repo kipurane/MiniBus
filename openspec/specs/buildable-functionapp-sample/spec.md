@@ -43,11 +43,11 @@ The Function App sample SHALL include at least one MiniBus handler that processe
 - **THEN** the handler receives a MiniBus message, `MiniBusContext`, and `CancellationToken`, and requests outgoing work without Azure SDK dependencies
 
 ### Requirement: Sample documents configuration and limits
-The Function App sample SHALL document how to build and run the emulator-backed Billing reference workflow and clearly identify intentionally omitted production concerns.
+The Function App sample SHALL document how to build and run the emulator-backed Billing reference workflow and its optional SQL-backed reliability path while clearly identifying intentionally omitted production concerns.
 
 #### Scenario: Developer reads sample documentation
 - **WHEN** a developer opens the sample documentation
-- **THEN** it explains build commands, emulator setup, local configuration, command submission, observable workflow steps, emulator limitations, and that live Azure Service Bus coverage and mandatory SQL persistence wiring remain outside this sample slice
+- **THEN** it explains build commands, emulator setup, local configuration, command submission, SQL schema setup, SQL persistence registration, explicit outbox draining, observable workflow steps, local infrastructure limits, and that live Azure Service Bus coverage remains outside this sample slice
 
 ### Requirement: Billing sample provides an emulator-backed local workflow
 The Function App sample SHALL provide a locally runnable Billing reference workflow against the Azure Service Bus emulator without requiring a real Azure Service Bus namespace.
@@ -68,3 +68,17 @@ The Function App sample SHALL provide a locally runnable Billing reference workf
 - **WHEN** a developer reads the emulator-backed Billing workflow guidance
 - **THEN** it distinguishes validated local timeout scheduling or processing behavior from timeout behavior that remains outside the verified emulator workflow
 
+### Requirement: Billing sample provides a SQL-backed reliability reference path
+The Function App sample SHALL provide an optional SQL-backed Billing reference path that composes the existing Azure Functions processing flow, Azure Service Bus routes, SQL inbox/outbox persistence, and SQL saga persistence without changing the handler-facing Billing APIs.
+
+#### Scenario: Developer inspects SQL-backed Billing configuration
+- **WHEN** a developer reads the SQL-backed Billing sample path
+- **THEN** it shows explicit SQL schema setup, SQL persistence registration, and the application-owned outbox drain responsibility needed by the reliable workflow
+
+#### Scenario: SQL-backed workflow captures durable Billing work
+- **WHEN** the SQL-backed Billing workflow processes Billing messages that request outgoing receipt, event, and timeout work
+- **THEN** it demonstrates SQL inbox participation, SQL outbox capture for outgoing work, and SQL-backed saga state for the Billing saga before outbox draining occurs
+
+#### Scenario: SQL-backed workflow drains captured Billing work
+- **WHEN** the SQL-backed Billing reference path drains pending outbox work through the existing SQL outbox dispatcher
+- **THEN** it demonstrates the captured Billing send, publish, and scheduled timeout work flowing through the configured transport path

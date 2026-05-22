@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using MiniBus.AzureFunctions.Processing;
 using MiniBus.Core.Headers;
@@ -68,11 +69,100 @@ public sealed class ServiceBusEmulatorBillingWorkflowTests
         await eventReceiver.CompleteMessageAsync(eventMessage);
     }
 
+    [SqlBackedServiceBusEmulatorFact]
+    public async Task SqlBackedBillingWorkflow_DrainsOutboxThroughServiceBusEmulator()
+    {
+        await SkipWhenEmulatorIsUnavailableAsync();
+        await SkipWhenSqlServerIsUnavailableAsync();
+        await BillingSampleSqlSchemaApplier.ApplyAsync(
+            BillingSampleSqlPersistence.LocalConnectionString);
+
+        var connectionString = GetConnectionString();
+        await using var provider = BuildSqlBackedProvider(connectionString);
+        var processor = provider.GetRequiredService<MiniBusProcessor>();
+        var dispatcher = provider.GetRequiredService<MiniBus.Persistence.Sql.SqlMiniBusOutboxDispatcher>();
+        await using var client = new ServiceBusClient(connectionString);
+        var command = new CreateInvoice(
+            InvoiceId: $"emulator-sql-invoice-{Guid.NewGuid():N}",
+            CustomerId: "emulator-sql-customer",
+            Amount: 123.45m);
+
+        var seed = await BillingSampleSeeder.SendCreateInvoiceAsync(
+            connectionString,
+            command,
+            correlationId: $"emulator-sql-billing-{Guid.NewGuid():N}");
+
+        await using var commandReceiver = client.CreateReceiver(BillingTopology.InputQueue);
+        var commandMessage = await ReceiveRequiredAsync(
+            commandReceiver,
+            "SQL-backed Billing command",
+            seed.CorrelationId);
+        await processor.ProcessAsync(commandMessage);
+        await commandReceiver.CompleteMessageAsync(commandMessage);
+
+        Assert.Equal(2, await CountPendingOutboxRowsAsync(commandMessage.MessageId));
+
+        var commandDrainDispatched = await dispatcher.DispatchPendingAsync();
+
+        Assert.True(commandDrainDispatched >= 2);
+        Assert.Equal(0, await CountPendingOutboxRowsAsync(commandMessage.MessageId));
+        Assert.Equal(2, await CountDispatchedOutboxRowsAsync(commandMessage.MessageId));
+
+        await using var receiptReceiver = client.CreateReceiver(BillingTopology.ReceiptsQueue);
+        var receiptMessage = await ReceiveRequiredAsync(
+            receiptReceiver,
+            "SQL-backed receipt command",
+            seed.CorrelationId);
+        var receipt = Deserialize<SendInvoiceReceipt>(receiptMessage);
+        await receiptReceiver.CompleteMessageAsync(receiptMessage);
+
+        Assert.Equal(command.InvoiceId, receipt.InvoiceId);
+        Assert.Equal(command.CustomerId, receipt.CustomerId);
+
+        await using var eventReceiver = client.CreateReceiver(
+            BillingTopology.EventsTopic,
+            BillingTopology.BillingSubscription);
+        var eventMessage = await ReceiveRequiredAsync(
+            eventReceiver,
+            "SQL-backed InvoiceCreated event",
+            seed.CorrelationId);
+        var invoiceCreated = Deserialize<InvoiceCreated>(eventMessage);
+
+        Assert.Equal(command.InvoiceId, invoiceCreated.InvoiceId);
+        Assert.Equal(command.CustomerId, invoiceCreated.CustomerId);
+
+        await processor.ProcessAsync(eventMessage);
+        await eventReceiver.CompleteMessageAsync(eventMessage);
+
+        Assert.Equal(1, await CountPendingOutboxRowsAsync(eventMessage.MessageId));
+
+        var timeoutDrainDispatched = await dispatcher.DispatchPendingAsync();
+
+        Assert.True(timeoutDrainDispatched >= 1);
+        Assert.Equal(0, await CountPendingOutboxRowsAsync(eventMessage.MessageId));
+        Assert.Equal(1, await CountDispatchedOutboxRowsAsync(eventMessage.MessageId));
+    }
+
     private static ServiceProvider BuildProvider(string connectionString)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddBillingMiniBus(ReferenceSolutionAcceptanceTests.CreateBillingConfiguration(connectionString));
+
+        return services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
+    }
+
+    private static ServiceProvider BuildSqlBackedProvider(string connectionString)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddBillingMiniBus(ReferenceSolutionAcceptanceTests.CreateBillingConfiguration(
+            connectionString,
+            BillingSampleSqlPersistence.LocalConnectionString));
 
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -167,6 +257,18 @@ public sealed class ServiceBusEmulatorBillingWorkflowTests
             $"Start the Billing sample emulator compose file or set {ConnectionStringEnvironmentVariable}.");
     }
 
+    private static async Task SkipWhenSqlServerIsUnavailableAsync()
+    {
+        if (await TcpPortIsReachableAsync("localhost", 14333))
+        {
+            return;
+        }
+
+        throw SkipException.ForSkip(
+            "The Billing sample SQL Server endpoint is not reachable on localhost:14333. " +
+            "Start the current Billing sample emulator compose file before running this scenario.");
+    }
+
     private static async Task<bool> TcpPortIsReachableAsync(string host, int port)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
@@ -189,9 +291,43 @@ public sealed class ServiceBusEmulatorBillingWorkflowTests
         return false;
     }
 
+    private static Task<int> CountPendingOutboxRowsAsync(string incomingMessageId)
+    {
+        return CountOutboxRowsAsync(incomingMessageId, dispatched: false);
+    }
+
+    private static Task<int> CountDispatchedOutboxRowsAsync(string incomingMessageId)
+    {
+        return CountOutboxRowsAsync(incomingMessageId, dispatched: true);
+    }
+
+    private static async Task<int> CountOutboxRowsAsync(string incomingMessageId, bool dispatched)
+    {
+        await using var connection = new SqlConnection(BillingSampleSqlPersistence.LocalConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT COUNT(*)
+            FROM [{BillingSampleSqlPersistence.DefaultSchemaName}].[Outbox]
+            WHERE IncomingMessageId = @IncomingMessageId
+              AND DispatchedUtc IS {(dispatched ? "NOT " : string.Empty)}NULL;
+            """;
+        command.Parameters.AddWithValue("@IncomingMessageId", incomingMessageId);
+
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
     private sealed class ServiceBusEmulatorFactAttribute : FactAttribute
     {
         public ServiceBusEmulatorFactAttribute()
+        {
+            Timeout = 120_000;
+        }
+    }
+
+    private sealed class SqlBackedServiceBusEmulatorFactAttribute : FactAttribute
+    {
+        public SqlBackedServiceBusEmulatorFactAttribute()
         {
             Timeout = 120_000;
         }

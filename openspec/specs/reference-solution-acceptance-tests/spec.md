@@ -15,15 +15,19 @@ MiniBus SHALL provide an always-on high-level acceptance test that verifies a sa
 - **THEN** the Tier 1 acceptance test uses recording or fake transport and settlement dependencies and remains eligible to run with the normal unit and component tests
 
 ### Requirement: Tier 2 SQL-backed reference scenario
-MiniBus SHALL provide SQL-backed high-level acceptance scenarios that verify the reference workflow composes with SQL persistence enabled, including durable capture and later dispatch of persisted outbox work.
+MiniBus SHALL provide SQL-backed high-level acceptance scenarios that verify the Billing reference workflow composes with sample-style SQL persistence enabled, including SQL inbox duplicate handling, SQL saga persistence, durable outbox capture, and later dispatch of persisted outbox work.
 
 #### Scenario: SQL-backed workflow records durable processing effects
-- **WHEN** the Tier 2 acceptance scenario runs with SQL Server available through Testcontainers or a documented external SQL Server/Azure SQL test connection string and processes the reference billing message with SQL persistence enabled
-- **THEN** MiniBus records the incoming message in the SQL inbox and captures outgoing send, publish, or schedule work in the SQL outbox as part of the successful processing transaction
+- **WHEN** the Tier 2 acceptance scenario runs with SQL Server available through Testcontainers or a documented external SQL Server/Azure SQL test connection string and processes the Billing reference workflow with SQL persistence enabled
+- **THEN** MiniBus records processed Billing messages in the SQL inbox, captures outgoing send, publish, or schedule work in the SQL outbox as part of successful processing transactions, and persists Billing saga state through SQL
+
+#### Scenario: SQL-backed workflow skips a duplicate Billing message
+- **WHEN** the Tier 2 acceptance scenario processes a duplicate Billing message after the SQL inbox has recorded the successful first delivery
+- **THEN** MiniBus completes the duplicate without re-running Billing handler or saga work and without capturing duplicate outbox work
 
 #### Scenario: SQL-backed workflow drains captured outbox work
-- **WHEN** the Tier 2 acceptance scenario processes the reference billing workflow with SQL persistence enabled and then runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`
-- **THEN** MiniBus dispatches the persisted billing receipt command, invoice-created event, and invoice-payment-timeout schedule through the configured transport abstraction
+- **WHEN** the Tier 2 acceptance scenario processes the Billing reference workflow with SQL persistence enabled and then runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`
+- **THEN** MiniBus dispatches the persisted Billing receipt command, invoice-created event, and invoice-payment-timeout schedule through the configured transport abstraction
 - **AND** MiniBus marks the dispatched SQL outbox rows as dispatched so they no longer appear as pending or reclaimable work
 
 #### Scenario: SQL-backed scenario follows existing environment behavior

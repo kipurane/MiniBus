@@ -30,18 +30,38 @@ public static class BillingSampleSeeder
         correlationId ??= $"billing-{Guid.NewGuid():N}";
 
         var messageFactory = new AzureServiceBusMessageFactory(new SystemTextJsonMessageSerializer());
-        var serviceBusMessage = messageFactory.CreateMessage(
+        var serviceBusMessage = await messageFactory.CreateMessageAsync(
             command,
             typeof(CreateInvoice),
             new Dictionary<string, string>
             {
                 [CoreHeaderNames.CorrelationId] = correlationId
-            });
+            }, cancellationToken);
         serviceBusMessage.CorrelationId = correlationId;
 
-        await using var client = new ServiceBusClient(connectionString);
+        await using var client = new ServiceBusClient(
+            connectionString,
+            new ServiceBusClientOptions
+            {
+                RetryOptions =
+                {
+                    MaxRetries = 0,
+                    TryTimeout = TimeSpan.FromSeconds(15)
+                }
+            });
         await using var sender = client.CreateSender(BillingTopology.InputQueue);
-        await sender.SendMessageAsync(serviceBusMessage, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await sender.SendMessageAsync(serviceBusMessage, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceBusException exception) when (exception.Reason == ServiceBusFailureReason.ServiceTimeout)
+        {
+            throw new InvalidOperationException(
+                "The Billing seed command timed out sending to Service Bus. " +
+                "For the local emulator, wait until its topology is ready. " +
+                "If its SQL container was recreated, recreate or restart the emulator container too.",
+                exception);
+        }
 
         return new BillingSeedResult(
             command.InvoiceId,

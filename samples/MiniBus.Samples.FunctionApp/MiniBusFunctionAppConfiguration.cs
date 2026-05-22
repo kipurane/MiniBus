@@ -7,8 +7,10 @@ using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.Routing;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Handlers;
+using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
+using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.FunctionApp.Contracts;
 using MiniBus.Samples.FunctionApp.Handlers;
 using MiniBus.Samples.FunctionApp.Sagas;
@@ -46,8 +48,23 @@ public static class MiniBusFunctionAppConfiguration
         var sagaRegistry = new SagaRegistry();
         sagaRegistry.Register<BillingSaga, BillingSagaData>();
         services.AddSingleton(sagaRegistry);
-        services.AddSingleton<ISagaPersistence, InMemorySagaPersistence>();
         services.AddSingleton<SagaInvoker>();
+
+        if (BillingSampleSqlPersistence.IsEnabled(configuration))
+        {
+            services.AddSingleton<IMiniBusOutboxDispatcher>(
+                serviceProvider => serviceProvider.GetRequiredService<AzureServiceBusTransportDispatcher>());
+            services.AddMiniBusSqlPersistence(
+                BillingSampleSqlPersistence.GetConnectionString(configuration),
+                options =>
+                {
+                    options.SchemaName = BillingSampleSqlPersistence.GetSchemaName(configuration);
+                });
+        }
+        else
+        {
+            services.AddSingleton<ISagaPersistence, InMemorySagaPersistence>();
+        }
 
         return services;
     }

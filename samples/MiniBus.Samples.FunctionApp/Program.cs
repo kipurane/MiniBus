@@ -21,6 +21,29 @@ public static class Program
             return;
         }
 
+        if (BillingSampleSqlSchemaApplier.IsApplySchemaCommand(args))
+        {
+            var schemaScripts = await BillingSampleSqlSchemaApplier
+                .ApplyAsync(BillingSampleSqlPersistence.GetCommandConnectionString())
+                .ConfigureAwait(false);
+
+            Console.WriteLine(
+                $"Applied {schemaScripts} MiniBus SQL schema scripts " +
+                $"for the Billing reference workflow.");
+            return;
+        }
+
+        if (BillingSampleOutboxDrainer.IsDrainCommand(args))
+        {
+            var dispatched = await BillingSampleOutboxDrainer
+                .DispatchPendingAsync()
+                .ConfigureAwait(false);
+
+            Console.WriteLine(
+                $"Dispatched {dispatched} pending Billing outbox operations.");
+            return;
+        }
+
         var builder = FunctionsApplication.CreateBuilder(args);
 
         ConfigureServices(builder.Services, builder.Configuration);
