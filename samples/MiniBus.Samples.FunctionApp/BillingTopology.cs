@@ -10,6 +10,7 @@ public static class BillingTopology
     public const string InputQueue = "billing-queue";
     public const string ReceiptsQueue = "billing-receipts";
     public const string TimeoutsQueue = "billing-timeouts";
+    public const string InventoryQueue = "inventory-queue";
     public const string EventsTopic = "domain-events";
     public const string BillingSubscription = "billing";
 }

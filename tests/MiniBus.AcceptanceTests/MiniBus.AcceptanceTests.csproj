@@ -21,7 +21,9 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="../../samples/MiniBus.Samples.Contracts/MiniBus.Samples.Contracts.csproj" />
         <ProjectReference Include="../../samples/MiniBus.Samples.FunctionApp/MiniBus.Samples.FunctionApp.csproj" />
+        <ProjectReference Include="../../samples/MiniBus.Samples.Inventory.FunctionApp/MiniBus.Samples.Inventory.FunctionApp.csproj" />
         <ProjectReference Include="../../src/MiniBus.Persistence.Sql/MiniBus.Persistence.Sql.csproj" />
     </ItemGroup>
 

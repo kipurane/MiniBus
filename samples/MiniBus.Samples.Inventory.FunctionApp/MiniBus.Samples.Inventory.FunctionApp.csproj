@@ -20,16 +20,11 @@
     <ProjectReference Include="..\..\src\MiniBus.Core\MiniBus.Core.csproj" />
     <ProjectReference Include="..\..\src\MiniBus.AzureFunctions\MiniBus.AzureFunctions.csproj" />
     <ProjectReference Include="..\..\src\MiniBus.AzureServiceBus\MiniBus.AzureServiceBus.csproj" />
-    <ProjectReference Include="..\..\src\MiniBus.Persistence.Sql\MiniBus.Persistence.Sql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="host.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="local.settings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
-    <None Include="..\..\src\MiniBus.Persistence.Sql\Schema\*.sql"
-          Link="Schema\%(Filename)%(Extension)"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

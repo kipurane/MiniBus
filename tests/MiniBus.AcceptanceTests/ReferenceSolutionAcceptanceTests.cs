@@ -6,15 +6,19 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using MiniBus.AzureFunctions.Processing;
 using MiniBus.AzureFunctions.Settlement;
 using MiniBus.AzureServiceBus.Dispatching;
+using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql;
 using MiniBus.Persistence.Sql.DependencyInjection;
+using MiniBus.Samples.Contracts.Billing;
+using MiniBus.Samples.Contracts.Inventory;
 using MiniBus.Samples.FunctionApp;
-using MiniBus.Samples.FunctionApp.Contracts;
 using MiniBus.Samples.FunctionApp.Sagas;
+using MiniBus.Samples.Inventory.FunctionApp;
+using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 
 namespace MiniBus.AcceptanceTests;
 
@@ -50,9 +54,29 @@ public sealed class ReferenceSolutionAcceptanceTests
         Assert.Contains(sender.Sends, send =>
             send.Destination == "billing-receipts"
             && HasMessageType<SendInvoiceReceipt>(send.Message));
+        var reserveInventorySend = Assert.Single(sender.Sends, send =>
+            send.Destination == BillingTopology.InventoryQueue
+            && HasMessageType<ReserveInventory>(send.Message));
         var invoiceCreatedSend = Assert.Single(sender.Sends, send =>
             send.Destination == "domain-events"
             && HasMessageType<InvoiceCreated>(send.Message));
+
+        using var inventoryProvider = BuildInventorySampleStyleProvider();
+        var inventoryOptions = inventoryProvider.GetRequiredService<MiniBusProcessorOptions>();
+        Assert.Empty(inventoryOptions.Recoverability.DelayedRetries);
+        Assert.Null(inventoryProvider.GetService<IAzureServiceBusDelayedRetryScheduler>());
+        var inventoryProcessor = inventoryProvider.GetRequiredService<MiniBusProcessor>();
+        var inventoryActions = new RecordingMessageActions();
+        await inventoryProcessor.ProcessAsync(ToReceivedMessage(reserveInventorySend.Message), inventoryActions);
+
+        Assert.NotNull(inventoryActions.CompletedMessage);
+        Assert.Null(inventoryActions.DeadLetteredMessage);
+        var reservation = Assert.Single(
+            inventoryProvider.GetRequiredService<InventoryReservationLog>().Reservations);
+        Assert.Equal(invoiceId, reservation.InvoiceId);
+        Assert.Equal(customerId, reservation.CustomerId);
+        Assert.Equal("sample-sku", reservation.Sku);
+        Assert.Equal(1, reservation.Quantity);
 
         var eventActions = new RecordingMessageActions();
         await processor.ProcessAsync(ToReceivedMessage(invoiceCreatedSend.Message), eventActions);
@@ -78,6 +102,19 @@ public sealed class ReferenceSolutionAcceptanceTests
         services.AddBillingMiniBus(CreateBillingConfiguration());
         services.RemoveAll<IAzureServiceBusSender>();
         services.AddSingleton<IAzureServiceBusSender>(sender);
+
+        return services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
+    }
+
+    private static ServiceProvider BuildInventorySampleStyleProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddInventoryMiniBus(CreateInventoryConfiguration());
 
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -153,6 +190,20 @@ public sealed class ReferenceSolutionAcceptanceTests
                 settings[BillingSampleSqlPersistence.SchemaSetting] = billingSqlSchemaName;
             }
         }
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(settings)
+            .Build();
+    }
+
+    internal static IConfiguration CreateInventoryConfiguration(
+        string? serviceBusConnectionString = null)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            [InventoryTopology.ServiceBusConnectionSetting] =
+                serviceBusConnectionString ?? InventoryTopology.EmulatorConnectionString
+        };
 
         return new ConfigurationBuilder()
             .AddInMemoryCollection(settings)
@@ -257,7 +308,7 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
         Assert.NotNull(eventActions.CompletedMessage);
         Assert.Null(eventActions.DeadLetteredMessage);
         Assert.Equal(2, await database.CountRowsAsync(database.InboxTableName));
-        Assert.Equal(3, await database.CountRowsAsync(database.OutboxTableName));
+        Assert.Equal(4, await database.CountRowsAsync(database.OutboxTableName));
         Assert.Equal(1, await database.CountRowsAsync(database.SagaTableName));
 
         var operationKinds = await database.QueryStringsAsync($"""
@@ -315,17 +366,20 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
         Assert.Null(eventActions.DeadLetteredMessage);
         Assert.Empty(sender.Sends);
         Assert.Empty(sender.Schedules);
-        Assert.Equal(3, await database.CountRowsAsync(database.OutboxTableName));
-        Assert.Equal(3, await database.CountPendingOutboxRowsAsync());
+        Assert.Equal(4, await database.CountRowsAsync(database.OutboxTableName));
+        Assert.Equal(4, await database.CountPendingOutboxRowsAsync());
         Assert.Equal(0, await database.CountDispatchedOutboxRowsAsync());
 
         var dispatcher = provider.GetRequiredService<SqlMiniBusOutboxDispatcher>();
         var dispatched = await dispatcher.DispatchPendingAsync();
 
-        Assert.Equal(3, dispatched);
+        Assert.Equal(4, dispatched);
         Assert.Contains(sender.Sends, send =>
             send.Destination == "billing-receipts"
             && ReferenceSolutionAcceptanceTests.HasMessageType<SendInvoiceReceipt>(send.Message));
+        Assert.Contains(sender.Sends, send =>
+            send.Destination == BillingTopology.InventoryQueue
+            && ReferenceSolutionAcceptanceTests.HasMessageType<ReserveInventory>(send.Message));
         Assert.Contains(sender.Sends, send =>
             send.Destination == "domain-events"
             && ReferenceSolutionAcceptanceTests.HasMessageType<InvoiceCreated>(send.Message));
@@ -333,7 +387,7 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             schedule.Destination == "billing-timeouts"
             && ReferenceSolutionAcceptanceTests.HasMessageType<InvoicePaymentTimeout>(schedule.Message));
         Assert.True(timeoutSchedule.ScheduledEnqueueTime > DateTimeOffset.UtcNow.AddDays(6));
-        Assert.Equal(3, await database.CountDispatchedOutboxRowsAsync());
+        Assert.Equal(4, await database.CountDispatchedOutboxRowsAsync());
         Assert.Equal(0, await database.CountPendingOutboxRowsAsync());
     }
 
@@ -369,7 +423,7 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             correlationId: "billing-correlation-sql-duplicate-1");
 
         Assert.Equal(2, await database.CountRowsAsync(database.InboxTableName));
-        Assert.Equal(3, await database.CountRowsAsync(database.OutboxTableName));
+        Assert.Equal(4, await database.CountRowsAsync(database.OutboxTableName));
         Assert.Equal(1, await database.CountRowsAsync(database.SagaTableName));
         Assert.Empty(sender.Sends);
         Assert.Empty(sender.Schedules);

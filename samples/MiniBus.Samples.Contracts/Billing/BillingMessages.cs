@@ -1,7 +1,7 @@
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Sagas;
 
-namespace MiniBus.Samples.FunctionApp.Contracts;
+namespace MiniBus.Samples.Contracts.Billing;
 
 public sealed record CreateInvoice(string InvoiceId, string CustomerId, decimal Amount) : ICommand;
 

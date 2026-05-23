@@ -11,7 +11,8 @@ using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql.DependencyInjection;
-using MiniBus.Samples.FunctionApp.Contracts;
+using MiniBus.Samples.Contracts.Billing;
+using MiniBus.Samples.Contracts.Inventory;
 using MiniBus.Samples.FunctionApp.Handlers;
 using MiniBus.Samples.FunctionApp.Sagas;
 
@@ -75,6 +76,7 @@ public static class MiniBusFunctionAppConfiguration
 
         routes.MapCommand<CreateInvoice>(BillingTopology.InputQueue);
         routes.MapCommand<SendInvoiceReceipt>(BillingTopology.ReceiptsQueue);
+        routes.MapCommand<ReserveInventory>(BillingTopology.InventoryQueue);
         routes.MapEvent<InvoiceCreated>(BillingTopology.EventsTopic);
         routes.MapScheduledMessage<InvoicePaymentTimeout>(BillingTopology.TimeoutsQueue);
 

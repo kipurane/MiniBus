@@ -1,6 +1,6 @@
 using MiniBus.Core.Context;
 using MiniBus.Core.Sagas;
-using MiniBus.Samples.FunctionApp.Contracts;
+using MiniBus.Samples.Contracts.Billing;
 
 namespace MiniBus.Samples.FunctionApp.Sagas;
 

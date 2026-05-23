@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
 using MiniBus.Core.Context;
 using MiniBus.Core.Handlers;
-using MiniBus.Samples.FunctionApp.Contracts;
+using MiniBus.Samples.Contracts.Billing;
+using MiniBus.Samples.Contracts.Inventory;
 
 namespace MiniBus.Samples.FunctionApp.Handlers;
 
@@ -23,6 +24,11 @@ public sealed partial class CreateInvoiceHandler : IHandleMessages<CreateInvoice
 
         await context.Publish(
                 new InvoiceCreated(message.InvoiceId, message.CustomerId, message.Amount),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        await context.Send(
+                new ReserveInventory(message.InvoiceId, message.CustomerId, "sample-sku", 1),
                 cancellationToken)
             .ConfigureAwait(false);
 

@@ -91,9 +91,12 @@ wait_for_emulator
 
 cat <<'EOF'
 Billing emulator stack is ready.
-Starting the Function App in the foreground.
+Starting the Billing Function App in the foreground.
 
-Seed the first command from another terminal with:
+Start the Inventory Function App from another terminal with:
+  ./samples/MiniBus.Samples.Inventory.FunctionApp/run-local.sh
+
+Seed the first command from a third terminal with:
   ./samples/MiniBus.Samples.FunctionApp/seed-local.sh
 EOF
 
