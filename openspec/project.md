@@ -1283,7 +1283,7 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Add project templates.
 - [x] Add package metadata and central build props before real NuGet publishing.
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
-- [ ] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
+- [x] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
 - [ ] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
 - [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
