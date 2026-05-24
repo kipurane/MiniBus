@@ -9,7 +9,6 @@ using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
-using Xunit;
 
 namespace MiniBus.AzureServiceBus.Tests;
 

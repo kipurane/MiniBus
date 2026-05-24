@@ -4,7 +4,6 @@ using MiniBus.AzureFunctions.Processing.Pipeline;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Serialization;
-using Xunit;
 
 namespace MiniBus.AzureFunctions.Tests;
 

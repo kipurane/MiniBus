@@ -6,7 +6,6 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using MiniBus.AzureFunctions.Processing;
-using MiniBus.AzureFunctions.SourceGenerators;
 
 namespace MiniBus.AzureFunctions.SourceGenerators.Tests;
 

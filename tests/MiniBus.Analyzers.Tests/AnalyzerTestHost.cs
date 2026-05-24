@@ -3,7 +3,6 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using MiniBus.Analyzers;
 using MiniBus.AzureFunctions.DependencyInjection;
 using MiniBus.AzureFunctions.Processing;
 using MiniBus.AzureServiceBus.Routing;

@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Net.Sockets;
 using System.Text.Json;
-using DotNet.Testcontainers.Builders;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MiniBus.Core.Context;

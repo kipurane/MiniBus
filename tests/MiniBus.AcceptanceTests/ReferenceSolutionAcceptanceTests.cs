@@ -8,15 +8,11 @@ using MiniBus.AzureFunctions.Settlement;
 using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.Core.Headers;
-using MiniBus.Core.Persistence;
-using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql;
-using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
 using MiniBus.Samples.Billing.FunctionApp;
-using MiniBus.Samples.Billing.FunctionApp.Sagas;
 using MiniBus.Samples.Inventory.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 

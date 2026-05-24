@@ -1,7 +1,6 @@
 using System.Net.Sockets;
 using System.Text;
 using Azure.Storage.Blobs;
-using MiniBus.Core.Auditing;
 using Testcontainers.Azurite;
 using Xunit;
 
