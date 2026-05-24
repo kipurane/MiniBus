@@ -1245,6 +1245,63 @@ Implemented baseline:
 - Documentation.
 - Testing helpers.
 
+### Phase 11 — Operational tooling
+
+Planned direction:
+
+- Add a shared MiniBus tooling substrate before building user-facing tools.
+- Build CLI and UI as two front doors over the same tooling core, not as separate implementations.
+- Use CLI commands for repeatable local troubleshooting, scripted operations, CI diagnostics, and safe administrative actions.
+- Use a local UI for correlated operational understanding: message timelines, inbox/outbox state, saga state, dispatch outcomes, logs, traces, metrics, and broker state.
+- Keep tooling focused on observing and operating MiniBus runtime state; it must not become a second message-processing runtime.
+- Prefer provider modules for SQL persistence, Azure Service Bus, and observability backends.
+- Prefer Aspire for local sample orchestration when running SQL Server, Service Bus emulator, Function Apps, dispatcher hosts, tooling API, and tooling UI together.
+- Keep Aspire as a development/sample orchestration concern rather than a runtime dependency of MiniBus packages.
+
+Conceptual shape:
+
+```text
+                  ┌────────────────────────┐
+                  │  MiniBus.Tooling.Core  │
+                  │  readers + actions     │
+                  └───────────┬────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+ ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
+ │ CLI console    │   │ Minimal API    │   │ provider       │
+ │ scripts/CI/dev │   │ local/remote   │   │ modules        │
+ └────────────────┘   └───────┬────────┘   └────────────────┘
+                              │
+                              ▼
+                       ┌────────────┐
+                       │ Blazor UI  │
+                       └────────────┘
+```
+
+Initial operational surfaces:
+
+- SQL inbox records: endpoint, logical message id, timestamps, correlation metadata, and duplicate-processing evidence.
+- SQL outbox records: pending/claimed/dispatched/failed state, operation kind, due time, attempt metadata, last error, and deterministic outgoing message id.
+- SQL saga records: saga type, correlation id, completion state, updated timestamp, version metadata, and serialized state inspection with appropriate redaction boundaries.
+- Azure Service Bus entities: configured queues, topics, subscriptions, active/dead-letter counts, and dead-letter peek where credentials allow it.
+- Observability: structured MiniBus logs, traces, metrics, and audit records when the application has configured a readable sink.
+- Safe actions: bounded outbox drain, failed outbox retry, broker/DLQ peek, and later carefully scoped DLQ resubmission if requirements justify it.
+
+The main value of the UI is correlation rather than replacing Azure Portal or Service Bus Explorer:
+
+```text
+Message 123
+  ├─ inbox: processed by Billing endpoint
+  ├─ saga: BillingSaga/order-42 updated
+  ├─ outbox: InvoiceCreated published
+  ├─ broker: message visible in inventory subscription
+  └─ logs/traces: handler completed with correlated diagnostics
+```
+
+Custom application logs should not be scraped from arbitrary console output. Tooling should read structured logs only through an explicit sink such as local JSON files, OpenTelemetry collector output, Application Insights/Azure Monitor, or a future MiniBus-native audit/event store.
+
 ---
 
 ## 24. Remaining feature backlog
@@ -1329,6 +1386,22 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
+### 24.7 Tooling and local operations
+
+The first tooling increment should harden a shared model before investing heavily in UI. CLI and UI should reuse the same core services so command output, API responses, and UI screens describe the same MiniBus state.
+
+- [ ] Create a tooling proposal that defines the shared tooling substrate, package/project boundaries, provider model, and first safe operations.
+- [ ] Add a provider-neutral tooling core for read models and action contracts over inbox, outbox, sagas, broker state, and observability sources.
+- [ ] Add SQL tooling readers for inbox, outbox, and saga state, including filtering by endpoint, message id, correlation id, status, and time window.
+- [ ] Add safe SQL outbox operations for bounded drain and retry-oriented troubleshooting over the existing `SqlMiniBusOutboxDispatcher`.
+- [ ] Add Azure Service Bus inspection for queues, topics, subscriptions, active/dead-letter counts, and dead-letter peek where credentials allow it.
+- [ ] Decide the first structured log source for local tooling, such as JSON log files, OpenTelemetry collector output, or a MiniBus-native audit/event store.
+- [ ] Add a CLI console app over the shared tooling core for local troubleshooting, scripts, and CI diagnostics.
+- [ ] Add a Minimal API over the shared tooling core so UI and future remote tooling use a stable HTTP boundary.
+- [ ] Add a Blazor Web App UI focused on correlated message timelines, inbox/outbox state, saga state, and dispatch/broker diagnostics.
+- [ ] Add Aspire-based local orchestration for the reference samples, SQL Server, Service Bus emulator, dispatcher host, tooling API, and tooling UI.
+- [ ] Document local-only versus Azure-hosted tooling deployment guidance, including credential handling, read/write action safety, and redaction expectations.
+
 ---
 
 ## 25. Deferred feature backlog
@@ -1343,6 +1416,10 @@ This list captures capabilities that may become valuable later but should not di
 - [ ] Add optional Azure Table Storage inbox and saga persistence if MiniBus needs a SQL-free Azure Storage reliability mode for lightweight/serverless workloads.
 - [ ] Decide whether automatic Azure infrastructure provisioning belongs in this framework or in templates/documentation only.
 - [ ] Add an optional one-topic-per-event-type topology if the shared topic plus subscription filter model becomes too limiting.
+- [ ] Add DLQ resubmission, message replay, or destructive broker actions only after explicit safety, authorization, and audit requirements exist.
+- [ ] Add Azure Monitor/Application Insights query integration for hosted UI diagnostics if local structured log reading is not enough.
+- [ ] Add a durable MiniBus-native audit/event store if SQL inbox/outbox/saga state plus logs/traces cannot answer message timeline questions reliably.
+- [ ] Add remote Azure Container Apps or Container Apps Environment deployment templates for the tooling API/UI if local tooling proves useful enough.
 
 ---
 
@@ -1357,7 +1434,7 @@ MiniBus should not initially support:
 - Distributed transactions.
 - Full compatibility with any existing message bus framework.
 - Full saga DSL parity with any existing message bus framework.
-- Graphical service control tooling.
+- Enterprise-scale graphical service control tooling that attempts to replace Azure Portal, Service Bus Explorer, or a full observability platform.
 - Automatic Azure infrastructure provisioning.
 - Multi-tenant framework complexity.
 - Complex plugin ecosystem.
@@ -1487,6 +1564,8 @@ Resolved early questions:
 3. SQL schema is shipped as explicit scripts rather than framework-owned runtime migrations.
 4. Source generation is part of the developer-experience baseline, while manual wrappers remain supported.
 5. SQL outbox dispatch is separate from message processing; supported scheduling models include manual drains, hosted-service drains, dedicated workers, and the active timer-triggered Functions backlog item.
+6. MiniBus operational tooling should start from a shared tooling core, with CLI and UI as clients over the same read/action model.
+7. Aspire is a good fit for local sample orchestration, but it should not become a runtime dependency of MiniBus packages.
 
 Open or deferred questions:
 
@@ -1495,6 +1574,8 @@ Open or deferred questions:
 3. Should event topology remain a shared topic with subscriptions, or should a one-topic-per-event-type topology be added?
 4. Should message schema versioning become a first-class MiniBus concern?
 5. Should optional Azure Table Storage inbox/saga persistence become a SQL-free reliability mode?
+6. Which structured log source should the first local tooling implementation read?
+7. Should MiniBus eventually own a durable audit/event store for message timelines, or rely on configured logging/tracing backends?
 
 ---
 
