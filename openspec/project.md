@@ -1510,7 +1510,7 @@ add-timer-triggered-sql-outbox-dispatch
 Completed but not yet archived changes:
 
 ```text
-add-sql-outbox-hosted-dispatch
+None.
 ```
 
 ---
