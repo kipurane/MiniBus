@@ -128,7 +128,10 @@ public sealed class SqlMiniBusOutboxDispatcherMetricsTests
             CancellationToken cancellationToken = default)
         {
             BatchSize = batchSize;
-            return Task.FromResult(_operations);
+            return Task.FromResult<IReadOnlyList<MiniBusOutboxStoredOperation>>(
+                _operations
+                    .Where(operation => !Dispatched.Contains(operation.Id))
+                    .ToArray());
         }
 
         public Task MarkDispatchedAsync(

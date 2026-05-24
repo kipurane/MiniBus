@@ -2,31 +2,44 @@ using System.Data.Common;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 
 namespace MiniBus.Persistence.Sql;
 
-internal sealed class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
+internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
 {
     private readonly DbConnection _connection;
     private readonly DbTransaction? _transaction;
     private readonly bool _ownsConnection;
     private readonly SqlTableNames _tableNames;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
+    private readonly ISqlMiniBusOutboxDispatchSignal _dispatchSignal;
+    private readonly ILogger<SqlMiniBusPersistenceSession> _logger;
 
     public SqlMiniBusPersistenceSession(
         DbConnection connection,
         DbTransaction? transaction,
         bool ownsConnection,
         SqlTableNames tableNames,
-        SqlOutboxOperationSerializer operationSerializer)
+        SqlOutboxOperationSerializer operationSerializer,
+        ISqlMiniBusOutboxDispatchSignal dispatchSignal,
+        ILogger<SqlMiniBusPersistenceSession>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(tableNames);
+        ArgumentNullException.ThrowIfNull(operationSerializer);
+        ArgumentNullException.ThrowIfNull(dispatchSignal);
+
         _connection = connection;
         _transaction = transaction;
         _ownsConnection = ownsConnection;
         _tableNames = tableNames;
         _operationSerializer = operationSerializer;
+        _dispatchSignal = dispatchSignal;
+        _logger = logger ?? NullLogger<SqlMiniBusPersistenceSession>.Instance;
     }
 
     public async Task<bool> IsProcessedAsync(
@@ -63,6 +76,7 @@ internal sealed class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
             return;
         }
 
+        var committedMiniBusOwnedTransaction = false;
         await using var transaction = await _connection
             .BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -80,11 +94,17 @@ internal sealed class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            committedMiniBusOwnedTransaction = true;
         }
         catch
         {
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             throw;
+        }
+
+        if (committedMiniBusOwnedTransaction && outboxOperations.Count > 0)
+        {
+            WakeDispatcherBestEffort();
         }
     }
 
@@ -111,6 +131,32 @@ internal sealed class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
             sequence++;
         }
     }
+
+    private void WakeDispatcherBestEffort()
+    {
+        try
+        {
+            _dispatchSignal.Wake();
+        }
+        catch (Exception exception) when (IsBestEffortWakeFailure(exception))
+        {
+            LogWakeFailed(_logger, exception);
+        }
+    }
+
+    private static bool IsBestEffortWakeFailure(Exception exception)
+    {
+        return exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
+    }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Debug,
+        Message = "MiniBus SQL outbox dispatch wake-up failed after a successful commit.")]
+    private static partial void LogWakeFailed(ILogger logger, Exception exception);
 
     private async Task InsertInboxRecordAsync(
         MiniBusInboxMessage message,

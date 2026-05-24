@@ -20,7 +20,7 @@ None.
 
 ## Impact
 
-- Affected packages: `MiniBus.Persistence.Sql` and any hosting-facing documentation that shows SQL outbox usage.
+- Affected packages: `MiniBus.Persistence.Sql` and any hosting-facing documentation that shows SQL outbox usage. The SQL package may need a hosting abstraction dependency, such as `Microsoft.Extensions.Hosting.Abstractions`, for `IHostedService` registration.
 - Affected APIs: SQL persistence dependency injection surface and new hosted-dispatch configuration API.
 - Affected behavior: applications may opt into background outbox draining, but processing guarantees remain commit-first and dispatch-later.
 - Affected tests: SQL persistence and acceptance coverage for manual mode, hosted automatic mode, failure backoff, recovery, and graceful shutdown.

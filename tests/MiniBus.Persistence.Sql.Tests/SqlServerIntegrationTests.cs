@@ -1,14 +1,18 @@
 using Microsoft.Data.SqlClient;
+using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Net.Sockets;
 using System.Text.Json;
 using DotNet.Testcontainers.Builders;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
+using MiniBus.Persistence.Sql.DependencyInjection;
 using Testcontainers.MsSql;
 using Xunit;
 
@@ -276,6 +280,62 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
     }
 
     [SqlServerFact]
+    public async Task HostedOutboxDispatcher_DispatchCycle_DrainsRealSqlOutboxStore()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync(options =>
+        {
+            options.DispatcherBatchSize = 1;
+        });
+        await using var session = await database.CreateSessionAsync();
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-hosted-dispatch"),
+            new[]
+            {
+                CreateOutboxOperation(),
+                CreateOutboxOperation()
+            });
+        var transportDispatcher = new RecordingOutboxDispatcher();
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, JsonMessageSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher>(transportDispatcher)
+            .AddMiniBusSqlPersistence(options =>
+            {
+                options.SchemaName = database.SchemaName;
+                options.ConnectionFactory = database.CreateConnection;
+                options.DispatcherBatchSize = 1;
+            })
+            .AddMiniBusSqlHostedOutboxDispatch(options =>
+            {
+                options.PollInterval = TimeSpan.FromMilliseconds(10);
+                options.MaxBatchesPerCycle = 5;
+                options.FailureBackoff = TimeSpan.FromMilliseconds(10);
+                options.DrainOnStartup = false;
+            })
+            .BuildServiceProvider();
+        var hostedService = Assert.Single(
+            serviceProvider.GetServices<IHostedService>(),
+            service => service.GetType() == typeof(SqlMiniBusOutboxHostedDispatcher));
+
+        try
+        {
+            await hostedService.StartAsync(CancellationToken.None);
+            using var waitCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await WaitUntilAsync(
+                async () => await database.CountDispatchedOutboxRowsAsync() == 2,
+                "SQL hosted outbox dispatcher to dispatch the two pending outbox rows",
+                waitCancellation.Token);
+        }
+        finally
+        {
+            using var stopCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await hostedService.StopAsync(stopCancellation.Token);
+        }
+
+        Assert.Equal(2, transportDispatcher.DispatchedCount);
+        Assert.Equal(2, await database.CountDispatchedOutboxRowsAsync());
+    }
+
+    [SqlServerFact]
     public async Task Commit_RollsBackInboxRecordWhenOutboxInsertFails()
     {
         await using var database = await _fixture.CreateDatabaseAsync();
@@ -510,7 +570,54 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         };
     }
 
+    private static async Task WaitUntilAsync(
+        Func<Task<bool>> condition,
+        string description,
+        CancellationToken cancellationToken,
+        TimeSpan? pollInterval = null)
+    {
+        var delay = pollInterval ?? TimeSpan.FromMilliseconds(25);
+
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (await condition())
+                {
+                    return;
+                }
+
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Timed out waiting for {description}.",
+                exception);
+        }
+    }
+
     private sealed record TestCommand(Guid Id) : ICommand;
+
+    private sealed class RecordingOutboxDispatcher : IMiniBusOutboxDispatcher
+    {
+        private readonly ConcurrentQueue<MiniBusOutboxStoredOperation> _dispatched = new();
+
+        public int DispatchedCount => _dispatched.Count;
+
+        public IReadOnlyList<MiniBusOutboxStoredOperation> DispatchedSnapshot => _dispatched.ToArray();
+
+        public Task DispatchAsync(
+            MiniBusOutboxStoredOperation operation,
+            CancellationToken cancellationToken = default)
+        {
+            _dispatched.Enqueue(operation);
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed record StartTimeoutSaga(string CorrelationId, DateTimeOffset DueTime) : ICommand;
 
@@ -776,6 +883,14 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             return new SqlMiniBusOutboxStore(_options, _operationSerializer);
         }
 
+        public SqlMiniBusOutboxDispatcher CreateOutboxDispatcher(IMiniBusOutboxDispatcher dispatcher)
+        {
+            return new SqlMiniBusOutboxDispatcher(
+                CreateOutboxStore(),
+                dispatcher,
+                _options);
+        }
+
         public ISagaPersistence CreateSagaPersistence()
         {
             return new SqlSagaPersistence(
@@ -847,6 +962,19 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
+        }
+
+        public async Task<int> CountDispatchedOutboxRowsAsync()
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                SELECT COUNT(*)
+                FROM {OutboxTableName}
+                WHERE DispatchedUtc IS NOT NULL;
+                """;
             return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
 

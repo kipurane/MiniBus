@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
@@ -8,6 +10,9 @@ namespace MiniBus.Persistence.Sql.DependencyInjection;
 
 public static class MiniBusSqlPersistenceServiceCollectionExtensions
 {
+    private static readonly Func<IServiceProvider, ISqlMiniBusOutboxDispatchSignal> DefaultNoopDispatchSignalFactory =
+        CreateDefaultNoopDispatchSignal;
+
     public static IServiceCollection AddMiniBusSqlPersistence(
         this IServiceCollection services,
         string connectionString,
@@ -42,13 +47,93 @@ public static class MiniBusSqlPersistenceServiceCollectionExtensions
         services.AddSingleton<SqlOutboxOperationSerializer>();
         services.AddSingleton<SqlSagaDataSerializer>();
         services.AddSingleton<SqlMiniBusOutboxMetrics>();
-        services.AddSingleton<IMiniBusPersistenceSessionFactory, SqlMiniBusPersistenceSessionFactory>();
+        services.TryAddSingleton<SqlMiniBusPersistenceRegistrationMarker>();
         services.AddSingleton<ISqlMiniBusOutboxStore, SqlMiniBusOutboxStore>();
         services.AddSingleton<SqlMiniBusOutboxDispatcher>();
+        services.TryAddSingleton<NoopSqlMiniBusOutboxDispatchSignal>();
+        services.TryAddSingleton<ISqlMiniBusOutboxDispatchSignal>(DefaultNoopDispatchSignalFactory);
+        services.AddSingleton<IMiniBusPersistenceSessionFactory>(serviceProvider =>
+            new SqlMiniBusPersistenceSessionFactory(
+                serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>(),
+                serviceProvider.GetRequiredService<SqlOutboxOperationSerializer>(),
+                serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>(),
+                serviceProvider.GetService<ILogger<SqlMiniBusPersistenceSession>>()));
         RegisterSqlSagaPersistence(services);
 
         return services;
     }
+
+    public static IServiceCollection AddMiniBusSqlHostedOutboxDispatch(
+        this IServiceCollection services,
+        Action<MiniBusSqlHostedOutboxDispatchOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        EnsureSqlPersistenceRegistered(services);
+
+        var options = new MiniBusSqlHostedOutboxDispatchOptions();
+        configureOptions?.Invoke(options);
+        var settings = options.ToSettings();
+
+        services.RemoveAll<MiniBusSqlHostedOutboxDispatchSettings>();
+        services.AddSingleton(settings);
+        ReplaceDefaultDispatchSignal(services);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SqlMiniBusOutboxHostedDispatcher>());
+
+        return services;
+    }
+
+    private static void ReplaceDefaultDispatchSignal(IServiceCollection services)
+    {
+        var removedDefaultSignal = false;
+
+        for (var index = services.Count - 1; index >= 0; index--)
+        {
+            var descriptor = services[index];
+            if (descriptor.ServiceType == typeof(ISqlMiniBusOutboxDispatchSignal)
+                && IsDefaultNoopDispatchSignal(descriptor))
+            {
+                services.RemoveAt(index);
+                removedDefaultSignal = true;
+            }
+        }
+
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(ISqlMiniBusOutboxDispatchSignal)))
+        {
+            return;
+        }
+
+        if (removedDefaultSignal)
+        {
+            services.RemoveAll<NoopSqlMiniBusOutboxDispatchSignal>();
+        }
+
+        services.AddSingleton<ISqlMiniBusOutboxDispatchSignal, SqlMiniBusOutboxDispatchSignal>();
+    }
+
+    private static bool IsDefaultNoopDispatchSignal(ServiceDescriptor descriptor)
+    {
+        return ReferenceEquals(descriptor.ImplementationFactory, DefaultNoopDispatchSignalFactory);
+    }
+
+    private static ISqlMiniBusOutboxDispatchSignal CreateDefaultNoopDispatchSignal(IServiceProvider serviceProvider)
+    {
+        return serviceProvider.GetRequiredService<NoopSqlMiniBusOutboxDispatchSignal>();
+    }
+
+    private static void EnsureSqlPersistenceRegistered(IServiceCollection services)
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(SqlMiniBusPersistenceRegistrationMarker)))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "MiniBus SQL hosted outbox dispatch requires SQL persistence services. " +
+            $"Call {nameof(AddMiniBusSqlPersistence)} before {nameof(AddMiniBusSqlHostedOutboxDispatch)}.");
+    }
+
+    private sealed class SqlMiniBusPersistenceRegistrationMarker;
 
     private static void RegisterSqlSagaPersistence(IServiceCollection services)
     {

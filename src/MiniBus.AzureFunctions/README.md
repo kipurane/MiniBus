@@ -236,6 +236,8 @@ var dispatcher = serviceProvider.GetRequiredService<SqlMiniBusOutboxDispatcher>(
 await dispatcher.DispatchPendingAsync(cancellationToken);
 ```
 
+`DispatchPendingAsync(CancellationToken)` dispatches one SQL batch. Use `DispatchPendingBatchesAsync(maxBatches, cancellationToken)` when a dispatcher worker should drain several batches while still keeping the call bounded.
+
 Outbox rows use deterministic outgoing message ids for replay-safe dispatch. Claimed rows become eligible for later dispatch after `OutboxClaimLeaseDuration` expires. SQL cleanup is explicit through application-owned maintenance code.
 
 When SQL persistence is registered and no custom saga persistence has already been registered, it also provides SQL-backed `ISagaPersistence`. Saga rows store serialized saga data, completion state, timestamps, and SQL Server rowversion metadata. Saves and completions use optimistic concurrency; stale updates fail with `SagaPersistenceException` and flow through normal recoverability.

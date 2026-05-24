@@ -21,6 +21,16 @@ MiniBus SQL persistence SHALL provide hosted outbox dispatch configuration for p
 - **THEN** MiniBus waits according to the configured polling behavior when no wake-up is pending
 - **AND** each dispatch cycle stops after the configured maximum number of batches or earlier when no pending work is dispatched
 
+#### Scenario: Hosted dispatch options are validated
+- **WHEN** an application configures hosted outbox dispatch with a non-positive polling interval, maximum batches per cycle, or failure backoff
+- **THEN** MiniBus rejects the hosted dispatch configuration with a clear error before starting the hosted service
+
+#### Scenario: Empty dispatch and failed dispatch are distinguishable
+- **WHEN** a hosted dispatch cycle finds no pending work
+- **THEN** MiniBus treats the cycle as idle and waits according to the configured polling behavior
+- **WHEN** a hosted dispatch cycle claims work but dispatching all claimed operations fails
+- **THEN** MiniBus records the failure path and applies the configured failure backoff instead of treating the cycle as idle
+
 #### Scenario: Failure backoff is applied
 - **WHEN** a hosted dispatch cycle fails before the service returns to its idle state
 - **THEN** MiniBus delays the next hosted dispatch attempt according to the configured backoff
@@ -34,6 +44,19 @@ MiniBus SQL persistence SHALL provide hosted outbox dispatch configuration for p
 - **WHEN** hosted outbox dispatch is enabled and MiniBus commits new outbox work in a MiniBus-owned transaction
 - **THEN** MiniBus can request an earlier in-process dispatch cycle for the local host
 - **AND** correctness does not depend on that signal because polling and claim-lease recovery still discover pending work
+
+#### Scenario: Wake-up follows MiniBus-owned commit success
+- **WHEN** hosted outbox dispatch is enabled and MiniBus successfully commits outbox work in a MiniBus-owned SQL transaction
+- **THEN** MiniBus requests an in-process wake-up after the durable commit succeeds
+
+#### Scenario: Wake-up is not sent for unsuccessful MiniBus-owned commit
+- **WHEN** hosted outbox dispatch is enabled and a MiniBus-owned SQL transaction fails or rolls back before committing outbox work
+- **THEN** MiniBus does not request an in-process wake-up for that failed persistence attempt
+
+#### Scenario: Application-owned transaction relies on polling
+- **WHEN** hosted outbox dispatch is enabled and MiniBus writes outbox rows inside an application-owned SQL transaction
+- **THEN** MiniBus does not request an in-process wake-up because it does not own the outer transaction commit moment
+- **AND** hosted dispatch discovers committed rows through polling and claim-lease recovery
 
 #### Scenario: Shutdown preserves recoverability
 - **WHEN** the host begins shutting down while hosted outbox dispatch is enabled

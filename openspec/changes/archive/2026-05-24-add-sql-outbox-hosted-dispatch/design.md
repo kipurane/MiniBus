@@ -41,21 +41,27 @@ The hosted options will cover:
 - failure backoff after dispatch loop errors
 - optional drain on startup
 
+Hosted options will validate values at registration time. Poll interval, maximum batches per cycle, and failure backoff must be positive, and defaults will be conservative enough for local development without creating an aggressive idle poll loop.
+
+The hosted loop needs enough per-cycle result metadata to distinguish an empty dispatch from a dispatch cycle that claimed work but failed every operation. The public manual dispatcher API may remain `DispatchPendingAsync(...) -> int` for compatibility, but the hosted service must not infer "idle" solely from a zero dispatched count if failed work was attempted. Implementation can satisfy this by adding an internal result shape, exposing richer dispatcher metadata carefully, or otherwise letting the hosted loop observe claimed/dispatched/failed counts without duplicating dispatch logic.
+
 This keeps dispatch behavior centered on the existing claim/dispatch/mark-dispatched flow instead of adding a second dispatch implementation.
 
 Alternatives considered:
 - One batch per timer tick only: simpler, but increases latency and backlog drain time under sustained load.
 - Drain until empty with no batch cap: rejected because a single host could monopolize work and delay shutdown or configuration responsiveness.
+- Treat `DispatchPendingAsync` returning zero as always idle: rejected because zero dispatched can also mean claimed operations all failed, which should feed failure diagnostics/backoff rather than quiet idle polling.
 
 ### 3. Low-latency wake-up will be best-effort, not the correctness mechanism
 
 When hosted dispatch is enabled, MiniBus will add a local wake-up signal that can request an earlier dispatch cycle after new outbox work is committed in a MiniBus-owned transaction. Polling remains the correctness baseline for crash recovery, multi-instance discovery, and application-owned transaction paths.
 
-For application-owned SQL transactions, MiniBus will not try to infer the outer transaction's final commit moment. Those paths will rely on polling unless the application chooses to trigger manual dispatch separately.
+The wake-up signal fires only after the MiniBus-owned SQL transaction commits successfully. If the MiniBus-owned commit fails or rolls back, no wake-up is sent. For application-owned SQL transactions, MiniBus will not try to infer the outer transaction's final commit moment; those paths will rely on polling unless the application chooses to trigger manual dispatch separately.
 
 Alternatives considered:
 - No wake-up support at all: valid, but adds avoidable latency for the common in-process hosted scenario.
 - Treat wake-up as required for correctness: rejected because signals are process-local and do not survive crashes or help other instances discover work.
+- Fire wake-up whenever outbox rows are inserted: rejected because rows inserted inside an application-owned transaction may still roll back, and signaling before durable commit can produce confusing empty dispatch cycles.
 
 ### 4. Observability will extend the current dispatch story instead of replacing it
 

@@ -155,6 +155,24 @@ services.AddMiniBusSqlPersistence(options =>
 
 The normal Azure Functions path lets MiniBus own the SQL transaction for inbox and outbox commits. Applications that need business data and MiniBus persistence in one SQL transaction can use the advanced `SqlMiniBusPersistenceSessionFactory.CreateForTransaction(DbConnection, DbTransaction)` API with an open connection and active transaction. In that mode MiniBus writes its inbox/outbox state inside the caller-owned transaction, but the application remains responsible for commit, rollback, and disposal.
 
+Outbox dispatch is intentionally separate from handler execution. Manual dispatch is the default, using `SqlMiniBusOutboxDispatcher.DispatchPendingAsync` from an application-owned timer, worker, or external dispatcher process. `DispatchPendingAsync(CancellationToken)` dispatches one SQL batch; dispatcher workers can call `DispatchPendingBatchesAsync(maxBatches, cancellationToken)` when they want a bounded multi-batch drain. Single-process hosts that want automatic draining can opt in to the hosted dispatcher:
+
+```csharp
+services
+    .AddMiniBusSqlPersistence(connectionString)
+    .AddMiniBusSqlHostedOutboxDispatch(options =>
+    {
+        options.PollInterval = TimeSpan.FromSeconds(5);
+        options.MaxBatchesPerCycle = 10;
+        options.FailureBackoff = TimeSpan.FromSeconds(30);
+        options.DrainOnStartup = true;
+    });
+```
+
+Hosted dispatch wakes best-effort after successful MiniBus-owned SQL commits, polls for work otherwise, and uses the same claim-lease and at-least-once dispatch semantics as the manual dispatcher. Application-owned SQL transactions are still discovered through polling because MiniBus does not own the outer transaction commit moment.
+
+Advanced hosts can register a custom `ISqlMiniBusOutboxDispatchSignal` before enabling hosted dispatch when they need to coordinate the in-process wake-up path themselves.
+
 Cleanup is explicit and retention-based:
 
 ```csharp

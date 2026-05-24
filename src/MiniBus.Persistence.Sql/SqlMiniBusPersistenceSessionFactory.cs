@@ -1,5 +1,7 @@
 using System.Data;
 using System.Data.Common;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MiniBus.Core.Persistence;
 
 namespace MiniBus.Persistence.Sql;
@@ -9,14 +11,48 @@ public sealed class SqlMiniBusPersistenceSessionFactory : IMiniBusPersistenceSes
     private readonly MiniBusSqlPersistenceOptions _options;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
     private readonly SqlTableNames _tableNames;
+    private readonly ISqlMiniBusOutboxDispatchSignal _dispatchSignal;
+    private readonly ILogger<SqlMiniBusPersistenceSession> _sessionLogger;
 
     public SqlMiniBusPersistenceSessionFactory(
         MiniBusSqlPersistenceOptions options,
         SqlOutboxOperationSerializer operationSerializer)
+        : this(
+            options,
+            operationSerializer,
+            new NoopSqlMiniBusOutboxDispatchSignal(),
+            NullLogger<SqlMiniBusPersistenceSession>.Instance)
     {
+    }
+
+    public SqlMiniBusPersistenceSessionFactory(
+        MiniBusSqlPersistenceOptions options,
+        SqlOutboxOperationSerializer operationSerializer,
+        ISqlMiniBusOutboxDispatchSignal dispatchSignal,
+        ILoggerFactory? loggerFactory = null)
+        : this(
+            options,
+            operationSerializer,
+            dispatchSignal,
+            loggerFactory?.CreateLogger<SqlMiniBusPersistenceSession>())
+    {
+    }
+
+    internal SqlMiniBusPersistenceSessionFactory(
+        MiniBusSqlPersistenceOptions options,
+        SqlOutboxOperationSerializer operationSerializer,
+        ISqlMiniBusOutboxDispatchSignal dispatchSignal,
+        ILogger<SqlMiniBusPersistenceSession>? sessionLogger)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(operationSerializer);
+        ArgumentNullException.ThrowIfNull(dispatchSignal);
+
         _options = options;
         _operationSerializer = operationSerializer;
         _tableNames = new SqlTableNames(options);
+        _dispatchSignal = dispatchSignal;
+        _sessionLogger = sessionLogger ?? NullLogger<SqlMiniBusPersistenceSession>.Instance;
     }
 
     public async ValueTask<IMiniBusPersistenceSession> CreateAsync(
@@ -35,7 +71,9 @@ public sealed class SqlMiniBusPersistenceSessionFactory : IMiniBusPersistenceSes
             transaction: null,
             ownsConnection: true,
             _tableNames,
-            _operationSerializer);
+            _operationSerializer,
+            _dispatchSignal,
+            _sessionLogger);
     }
 
     public IMiniBusPersistenceSession CreateForTransaction(
@@ -65,6 +103,8 @@ public sealed class SqlMiniBusPersistenceSessionFactory : IMiniBusPersistenceSes
             transaction,
             ownsConnection: false,
             _tableNames,
-            _operationSerializer);
+            _operationSerializer,
+            _dispatchSignal,
+            _sessionLogger);
     }
 }

@@ -31,6 +31,42 @@ public sealed class SqlMiniBusOutboxDispatcher
 
     public async Task<int> DispatchPendingAsync(CancellationToken cancellationToken = default)
     {
+        return await DispatchPendingBatchesAsync(maxBatches: 1, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<int> DispatchPendingBatchesAsync(
+        int maxBatches,
+        CancellationToken cancellationToken = default)
+    {
+        var dispatched = 0;
+
+        if (maxBatches <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maxBatches),
+                maxBatches,
+                "The maximum number of SQL outbox dispatch batches must be greater than zero.");
+        }
+
+        for (var batchAttemptCount = 0; batchAttemptCount < maxBatches; batchAttemptCount++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var result = await DispatchPendingBatchAsync(cancellationToken).ConfigureAwait(false);
+            dispatched += result.DispatchedCount;
+
+            if (result.ClaimedCount == 0 || result.FailedCount > 0)
+            {
+                break;
+            }
+        }
+
+        return dispatched;
+    }
+
+    internal async Task<SqlMiniBusOutboxDispatchResult> DispatchPendingBatchAsync(
+        CancellationToken cancellationToken = default)
+    {
         var batchScope = _metrics.StartBatch();
         IReadOnlyList<MiniBusOutboxStoredOperation>? operations = null;
         var dispatched = 0;
@@ -41,6 +77,7 @@ public sealed class SqlMiniBusOutboxDispatcher
             operations = await _store
                 .ClaimPendingAsync(_options.DispatcherBatchSize, cancellationToken)
                 .ConfigureAwait(false);
+            var claimedCount = operations.Count;
 
             foreach (var operation in operations)
             {
@@ -66,7 +103,7 @@ public sealed class SqlMiniBusOutboxDispatcher
                 }
             }
 
-            var batchOutcome = operations.Count == 0
+            var batchOutcome = claimedCount == 0
                 ? SqlMiniBusOutboxDispatchOutcomes.Empty
                 : failed > 0
                     ? SqlMiniBusOutboxDispatchOutcomes.Failed
@@ -74,12 +111,15 @@ public sealed class SqlMiniBusOutboxDispatcher
 
             _metrics.RecordBatch(
                 batchScope,
-                operations.Count,
+                claimedCount,
                 dispatched,
                 failed,
                 batchOutcome);
 
-            return dispatched;
+            return new SqlMiniBusOutboxDispatchResult(
+                claimedCount,
+                dispatched,
+                failed);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {

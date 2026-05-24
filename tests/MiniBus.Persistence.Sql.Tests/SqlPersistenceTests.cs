@@ -1,5 +1,8 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using MiniBus.AzureFunctions.DependencyInjection;
 using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Contracts;
@@ -142,6 +145,266 @@ public sealed class SqlPersistenceTests
             .BuildServiceProvider();
 
         Assert.IsType<CustomSagaPersistence>(serviceProvider.GetRequiredService<ISagaPersistence>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlPersistence_DoesNotRegisterHostedDispatcherByDefault()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .BuildServiceProvider();
+
+        Assert.Empty(serviceProvider.GetServices<IHostedService>());
+        Assert.NotNull(serviceProvider.GetRequiredService<SqlMiniBusOutboxDispatcher>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_RegistersHostedDispatcherAndKeepsManualDispatcher()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .AddMiniBusSqlHostedOutboxDispatch(options =>
+            {
+                options.PollInterval = TimeSpan.FromMilliseconds(25);
+                options.MaxBatchesPerCycle = 3;
+                options.FailureBackoff = TimeSpan.FromMilliseconds(50);
+                options.DrainOnStartup = false;
+            })
+            .BuildServiceProvider();
+
+        var settings = serviceProvider.GetRequiredService<MiniBusSqlHostedOutboxDispatchSettings>();
+
+        Assert.Equal(TimeSpan.FromMilliseconds(25), settings.PollInterval);
+        Assert.Equal(3, settings.MaxBatchesPerCycle);
+        Assert.Equal(TimeSpan.FromMilliseconds(50), settings.FailureBackoff);
+        Assert.False(settings.DrainOnStartup);
+        Assert.IsType<SqlMiniBusOutboxDispatcher>(serviceProvider.GetRequiredService<SqlMiniBusOutboxDispatcher>());
+        Assert.Contains(
+            serviceProvider.GetServices<IHostedService>(),
+            service => service.GetType() == typeof(SqlMiniBusOutboxHostedDispatcher));
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_DoesNotRegisterMutableOptions()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .AddMiniBusSqlHostedOutboxDispatch(options =>
+            {
+                options.PollInterval = TimeSpan.FromMilliseconds(25);
+                options.MaxBatchesPerCycle = 3;
+                options.FailureBackoff = TimeSpan.FromMilliseconds(50);
+                options.DrainOnStartup = false;
+            })
+            .BuildServiceProvider();
+        var settings = serviceProvider.GetRequiredService<MiniBusSqlHostedOutboxDispatchSettings>();
+
+        Assert.Null(serviceProvider.GetService<MiniBusSqlHostedOutboxDispatchOptions>());
+        Assert.Equal(TimeSpan.FromMilliseconds(25), settings.PollInterval);
+        Assert.Equal(3, settings.MaxBatchesPerCycle);
+        Assert.Equal(TimeSpan.FromMilliseconds(50), settings.FailureBackoff);
+        Assert.False(settings.DrainOnStartup);
+    }
+
+    [Theory]
+    [InlineData("poll", nameof(MiniBusSqlHostedOutboxDispatchOptions.PollInterval), "poll interval")]
+    [InlineData("batches", nameof(MiniBusSqlHostedOutboxDispatchOptions.MaxBatchesPerCycle), "maximum batches per cycle")]
+    [InlineData("backoff", nameof(MiniBusSqlHostedOutboxDispatchOptions.FailureBackoff), "failure backoff")]
+    public void AddMiniBusSqlHostedOutboxDispatch_ValidatesOptions(
+        string invalidOption,
+        string expectedParamName,
+        string expectedMessage)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false");
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            services.AddMiniBusSqlHostedOutboxDispatch(options =>
+            {
+                if (invalidOption == "poll")
+                {
+                    options.PollInterval = TimeSpan.Zero;
+                }
+
+                if (invalidOption == "batches")
+                {
+                    options.MaxBatchesPerCycle = 0;
+                }
+
+                if (invalidOption == "backoff")
+                {
+                    options.FailureBackoff = TimeSpan.Zero;
+                }
+            }));
+
+        Assert.Equal(expectedParamName, exception.ParamName);
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_RequiresSqlPersistenceRegistration()
+    {
+        var services = new ServiceCollection();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddMiniBusSqlHostedOutboxDispatch());
+
+        Assert.Contains(nameof(MiniBusSqlPersistenceServiceCollectionExtensions.AddMiniBusSqlPersistence), exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(MiniBusSqlPersistenceServiceCollectionExtensions.AddMiniBusSqlHostedOutboxDispatch), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_DoesNotAcceptManuallyRegisteredSqlServices()
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<ISqlMiniBusOutboxStore, RecordingOutboxStore>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddSingleton(new MiniBusSqlPersistenceOptions())
+            .AddSingleton<IMiniBusPersistenceSessionFactory>(serviceProvider =>
+                new SqlMiniBusPersistenceSessionFactory(
+                    serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>(),
+                    new SqlOutboxOperationSerializer(serviceProvider.GetRequiredService<IMessageSerializer>())))
+            .AddSingleton<SqlMiniBusOutboxDispatcher>();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddMiniBusSqlHostedOutboxDispatch());
+
+        Assert.Contains(nameof(MiniBusSqlPersistenceServiceCollectionExtensions.AddMiniBusSqlPersistence), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesCustomDispatchSignal()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .AddSingleton<ISqlMiniBusOutboxDispatchSignal, CustomDispatchSignal>()
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.IsType<CustomDispatchSignal>(
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesCustomDispatchSignalFactory()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .Replace(ServiceDescriptor.Singleton<ISqlMiniBusOutboxDispatchSignal>(_ =>
+                new CustomDispatchSignal()))
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.IsType<CustomDispatchSignal>(
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesCustomDispatchSignalFactoryDependencyOnNoopSignal()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .Replace(ServiceDescriptor.Singleton<ISqlMiniBusOutboxDispatchSignal>(serviceProvider =>
+                serviceProvider.GetRequiredService<NoopSqlMiniBusOutboxDispatchSignal>()))
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.Same(
+            serviceProvider.GetRequiredService<NoopSqlMiniBusOutboxDispatchSignal>(),
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesExplicitBuiltInDispatchSignal()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .Replace(ServiceDescriptor.Singleton<ISqlMiniBusOutboxDispatchSignal, SqlMiniBusOutboxDispatchSignal>())
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.IsType<SqlMiniBusOutboxDispatchSignal>(
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_ReplacesDefaultNoopDispatchSignalFactory()
+    {
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false")
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.IsType<SqlMiniBusOutboxDispatchSignal>(
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+        Assert.Empty(serviceProvider.GetServices<NoopSqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesExplicitNoopDispatchSignalInstance()
+    {
+        var noopSignal = new NoopSqlMiniBusOutboxDispatchSignal();
+        var services = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false");
+
+        services.Replace(ServiceDescriptor.Singleton<ISqlMiniBusOutboxDispatchSignal>(
+            noopSignal));
+
+        using var serviceProvider = services
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.Same(noopSignal, serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
+    }
+
+    [Fact]
+    public void AddMiniBusSqlHostedOutboxDispatch_PreservesExplicitNoopDispatchSignalType()
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IMessageSerializer, RecordingSerializer>()
+            .AddSingleton<IMiniBusOutboxDispatcher, RecordingDispatcher>()
+            .AddMiniBusSqlPersistence(
+                "Server=(localdb)\\MSSQLLocalDB;Database=MiniBusTests;Integrated Security=true;Encrypt=false");
+
+        services.Replace(ServiceDescriptor.Singleton<ISqlMiniBusOutboxDispatchSignal, NoopSqlMiniBusOutboxDispatchSignal>());
+
+        using var serviceProvider = services
+            .AddMiniBusSqlHostedOutboxDispatch()
+            .BuildServiceProvider();
+
+        Assert.IsType<NoopSqlMiniBusOutboxDispatchSignal>(
+            serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>());
     }
 
     [Fact]
@@ -295,6 +558,282 @@ public sealed class SqlPersistenceTests
     }
 
     [Fact]
+    public async Task OutboxDispatcher_DispatchPendingAsync_DispatchesSingleBatchByDefault()
+    {
+        var firstOperation = CreateStoredOperation();
+        var secondOperation = CreateStoredOperation();
+        var store = new SequencedOutboxStore(
+            new[] { firstOperation },
+            new[] { secondOperation },
+            Array.Empty<MiniBusOutboxStoredOperation>());
+        var dispatcher = new RecordingDispatcher();
+        var sqlDispatcher = new SqlMiniBusOutboxDispatcher(
+            store,
+            dispatcher,
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 1 });
+
+        var dispatched = await sqlDispatcher.DispatchPendingAsync();
+
+        Assert.Equal(1, dispatched);
+        Assert.Equal(1, store.ClaimCount);
+        Assert.Single(dispatcher.Dispatched);
+    }
+
+    [Fact]
+    public async Task OutboxDispatcher_DispatchPendingBatchesAsync_DispatchesUpToMaxBatches()
+    {
+        var firstOperation = CreateStoredOperation();
+        var secondOperation = CreateStoredOperation();
+        var store = new SequencedOutboxStore(
+            new[] { firstOperation },
+            new[] { secondOperation },
+            new[] { CreateStoredOperation() });
+        var dispatcher = new RecordingDispatcher();
+        var sqlDispatcher = new SqlMiniBusOutboxDispatcher(
+            store,
+            dispatcher,
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 1 });
+
+        var dispatched = await sqlDispatcher.DispatchPendingBatchesAsync(maxBatches: 2);
+
+        Assert.Equal(2, dispatched);
+        Assert.Equal(2, store.ClaimCount);
+        Assert.Equal(2, dispatcher.Dispatched.Count);
+    }
+
+    [Fact]
+    public async Task OutboxDispatcher_DispatchPendingBatchesAsync_ValidatesMaxBatches()
+    {
+        var sqlDispatcher = new SqlMiniBusOutboxDispatcher(
+            new SequencedOutboxStore(Array.Empty<MiniBusOutboxStoredOperation>()),
+            new RecordingDispatcher(),
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 1 });
+
+        var exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            sqlDispatcher.DispatchPendingBatchesAsync(maxBatches: 0));
+
+        Assert.Equal("maxBatches", exception.ParamName);
+        Assert.Contains("maximum number of SQL outbox dispatch batches", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OutboxDispatcher_DispatchPendingAsync_ThrowsWhenCancellationAlreadyRequested()
+    {
+        var sqlDispatcher = new SqlMiniBusOutboxDispatcher(
+            new SequencedOutboxStore(Array.Empty<MiniBusOutboxStoredOperation>()),
+            new RecordingDispatcher(),
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 1 });
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            sqlDispatcher.DispatchPendingAsync(cancellation.Token));
+    }
+
+    [Fact]
+    public async Task OutboxDispatcher_ReturnsClaimAndFailureCountsForDispatchCycle()
+    {
+        var operation = CreateStoredOperation();
+        var store = new RecordingOutboxStore(operation);
+        var dispatcher = new RecordingDispatcher
+        {
+            Exception = new InvalidOperationException("transport failed")
+        };
+        var sqlDispatcher = new SqlMiniBusOutboxDispatcher(
+            store,
+            dispatcher,
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 5 });
+
+        var result = await sqlDispatcher.DispatchPendingBatchAsync();
+
+        Assert.Equal(1, result.ClaimedCount);
+        Assert.Equal(0, result.DispatchedCount);
+        Assert.Equal(1, result.FailedCount);
+    }
+
+    [Fact]
+    public async Task HostedOutboxDispatcher_DispatchCycle_DrainsMultipleBatches()
+    {
+        var firstOperation = CreateStoredOperation();
+        var secondOperation = CreateStoredOperation();
+        var store = new SequencedOutboxStore(
+            new[] { firstOperation },
+            new[] { secondOperation },
+            Array.Empty<MiniBusOutboxStoredOperation>());
+        var dispatcher = new RecordingDispatcher();
+        var hostedDispatcher = CreateHostedDispatcher(store, dispatcher, options =>
+        {
+            options.MaxBatchesPerCycle = 5;
+        });
+
+        var result = await hostedDispatcher.DispatchCycleAsync();
+
+        Assert.Equal(3, result.BatchAttemptCount);
+        Assert.Equal(2, result.ClaimedCount);
+        Assert.Equal(2, result.DispatchedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.False(result.BackoffRequired);
+        Assert.Equal(3, store.ClaimCount);
+        Assert.Equal(2, dispatcher.Dispatched.Count);
+    }
+
+    [Fact]
+    public async Task HostedOutboxDispatcher_DispatchCycle_StopsAndBacksOffAfterClaimedFailure()
+    {
+        var operation = CreateStoredOperation();
+        var store = new SequencedOutboxStore(
+            new[] { operation },
+            new[] { CreateStoredOperation() });
+        var dispatcher = new RecordingDispatcher
+        {
+            Exception = new InvalidOperationException("transport failed")
+        };
+        var hostedDispatcher = CreateHostedDispatcher(store, dispatcher, options =>
+        {
+            options.MaxBatchesPerCycle = 5;
+        });
+
+        var result = await hostedDispatcher.DispatchCycleAsync();
+
+        Assert.Equal(1, result.BatchAttemptCount);
+        Assert.Equal(1, result.ClaimedCount);
+        Assert.Equal(0, result.DispatchedCount);
+        Assert.Equal(1, result.FailedCount);
+        Assert.True(result.BackoffRequired);
+        Assert.Equal(1, store.ClaimCount);
+    }
+
+    [Theory]
+    [InlineData("dispatcher")]
+    [InlineData("settings")]
+    [InlineData("signal")]
+    public void HostedOutboxDispatcher_Constructor_ValidatesRequiredDependencies(string nullDependency)
+    {
+        var dispatcher = new SqlMiniBusOutboxDispatcher(
+            new SequencedOutboxStore(Array.Empty<MiniBusOutboxStoredOperation>()),
+            new RecordingDispatcher(),
+            new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 1 });
+        var settings = new MiniBusSqlHostedOutboxDispatchOptions().ToSettings();
+        var signal = new SqlMiniBusOutboxDispatchSignal();
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            new SqlMiniBusOutboxHostedDispatcher(
+                nullDependency == "dispatcher" ? null! : dispatcher,
+                nullDependency == "settings" ? null! : settings,
+                nullDependency == "signal" ? null! : signal,
+                NullLogger<SqlMiniBusOutboxHostedDispatcher>.Instance));
+
+        Assert.Equal(nullDependency, exception.ParamName);
+    }
+
+    [Fact]
+    public async Task HostedOutboxDispatcher_ExecuteAsync_ContinuesImmediatelyWhenBacklogMayRemain()
+    {
+        var store = new SequencedOutboxStore(
+            new[] { CreateStoredOperation() },
+            new[] { CreateStoredOperation() },
+            Array.Empty<MiniBusOutboxStoredOperation>());
+        var dispatcher = new RecordingDispatcher();
+        var signal = new CoordinatedDispatchSignal();
+        var hostedDispatcher = CreateHostedDispatcher(
+            store,
+            dispatcher,
+            options =>
+            {
+                options.MaxBatchesPerCycle = 1;
+                options.PollInterval = TimeSpan.FromSeconds(30);
+                options.FailureBackoff = TimeSpan.FromSeconds(30);
+                options.DrainOnStartup = true;
+            },
+            signal);
+
+        await hostedDispatcher.StartAsync(CancellationToken.None);
+        await signal.WaitEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await hostedDispatcher.StopAsync(timeout.Token);
+
+        Assert.Equal(3, store.ClaimCount);
+        Assert.Equal(2, dispatcher.Dispatched.Count);
+    }
+
+    [Fact]
+    public async Task HostedOutboxDispatcher_StopAsync_CancelsIdlePollingPromptly()
+    {
+        var store = new SequencedOutboxStore(Array.Empty<MiniBusOutboxStoredOperation>());
+        var signal = new CoordinatedDispatchSignal();
+        var hostedDispatcher = CreateHostedDispatcher(
+            store,
+            new RecordingDispatcher(),
+            options =>
+            {
+                options.DrainOnStartup = false;
+                options.PollInterval = TimeSpan.FromSeconds(30);
+                options.FailureBackoff = TimeSpan.FromSeconds(30);
+            },
+            signal);
+
+        await hostedDispatcher.StartAsync(CancellationToken.None);
+        await signal.WaitEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await hostedDispatcher.StopAsync(timeout.Token);
+
+        Assert.True(signal.CancellationObserved);
+        Assert.Equal(0, store.ClaimCount);
+    }
+
+    [Fact]
+    public async Task HostedOutboxDispatcher_ExecuteAsync_FallsBackToPollCycleWhenSignalWaitFails()
+    {
+        var store = new SequencedOutboxStore(
+            new[] { CreateStoredOperation() },
+            Array.Empty<MiniBusOutboxStoredOperation>());
+        var dispatcher = new RecordingDispatcher();
+        var signal = new FailingThenCoordinatedDispatchSignal();
+        var hostedDispatcher = CreateHostedDispatcher(
+            store,
+            dispatcher,
+            options =>
+            {
+                options.DrainOnStartup = false;
+                options.PollInterval = TimeSpan.FromSeconds(30);
+                options.FailureBackoff = TimeSpan.FromMilliseconds(10);
+            },
+            signal);
+
+        await hostedDispatcher.StartAsync(CancellationToken.None);
+        await signal.SecondWaitEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await hostedDispatcher.StopAsync(timeout.Token);
+
+        Assert.Equal(2, signal.WaitCount);
+        Assert.True(signal.CancellationObserved);
+        Assert.Equal(2, store.ClaimCount);
+        Assert.Single(dispatcher.Dispatched);
+    }
+
+    [Fact]
+    public async Task OutboxDispatchSignal_WaitAsync_PropagatesCancellation()
+    {
+        var signal = new SqlMiniBusOutboxDispatchSignal();
+        using var cancellation = new CancellationTokenSource();
+        var wait = signal.WaitAsync(TimeSpan.FromSeconds(30), cancellation.Token).AsTask();
+
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+    }
+
+    [Fact]
+    public async Task OutboxDispatchSignal_WaitAsync_ReturnsFalseOnTimeout()
+    {
+        var signal = new SqlMiniBusOutboxDispatchSignal();
+
+        var wasWoken = await signal.WaitAsync(TimeSpan.FromMilliseconds(1), CancellationToken.None);
+
+        Assert.False(wasWoken);
+    }
+
+    [Fact]
     public async Task OutboxDispatcher_RecordsFailureAndLeavesOperationRetryable()
     {
         var operation = CreateStoredOperation();
@@ -378,6 +917,31 @@ public sealed class SqlPersistenceTests
             AttemptCount: 0);
     }
 
+    private static SqlMiniBusOutboxHostedDispatcher CreateHostedDispatcher(
+        ISqlMiniBusOutboxStore store,
+        IMiniBusOutboxDispatcher dispatcher,
+        Action<MiniBusSqlHostedOutboxDispatchOptions>? configureOptions = null,
+        ISqlMiniBusOutboxDispatchSignal? signal = null)
+    {
+        var options = new MiniBusSqlHostedOutboxDispatchOptions
+        {
+            PollInterval = TimeSpan.FromMilliseconds(10),
+            FailureBackoff = TimeSpan.FromMilliseconds(10),
+            MaxBatchesPerCycle = 10,
+            DrainOnStartup = true
+        };
+        configureOptions?.Invoke(options);
+
+        return new SqlMiniBusOutboxHostedDispatcher(
+            new SqlMiniBusOutboxDispatcher(
+                store,
+                dispatcher,
+                new MiniBusSqlPersistenceOptions { DispatcherBatchSize = 10 }),
+            options.ToSettings(),
+            signal ?? new SqlMiniBusOutboxDispatchSignal(),
+            NullLogger<SqlMiniBusOutboxHostedDispatcher>.Instance);
+    }
+
     private sealed record TestCommand(Guid Id) : ICommand;
 
     private sealed record TestTimeout(string CorrelationId) : ISagaTimeout;
@@ -452,7 +1016,61 @@ public sealed class SqlPersistenceTests
             CancellationToken cancellationToken = default)
         {
             ClaimedBatchSize = batchSize;
-            return Task.FromResult(_operations);
+            return Task.FromResult<IReadOnlyList<MiniBusOutboxStoredOperation>>(
+                _operations
+                    .Where(operation => !MarkedDispatched.Contains(operation.Id))
+                    .ToArray());
+        }
+
+        public Task MarkDispatchedAsync(Guid operationId, CancellationToken cancellationToken = default)
+        {
+            MarkedDispatched.Add(operationId);
+            return Task.CompletedTask;
+        }
+
+        public Task MarkFailedAsync(
+            Guid operationId,
+            Exception exception,
+            CancellationToken cancellationToken = default)
+        {
+            MarkedFailed.Add((operationId, exception));
+            return Task.CompletedTask;
+        }
+
+        public Task<int> CleanupAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
+        }
+    }
+
+    private sealed class SequencedOutboxStore : ISqlMiniBusOutboxStore
+    {
+        private readonly Queue<IReadOnlyList<MiniBusOutboxStoredOperation>> _batches;
+
+        public SequencedOutboxStore(params IReadOnlyList<MiniBusOutboxStoredOperation>[] batches)
+        {
+            _batches = new Queue<IReadOnlyList<MiniBusOutboxStoredOperation>>(batches);
+        }
+
+        public int ClaimCount { get; private set; }
+
+        public List<Guid> MarkedDispatched { get; } = new();
+
+        public List<(Guid OperationId, Exception Exception)> MarkedFailed { get; } = new();
+
+        public Task<IReadOnlyList<MiniBusOutboxStoredOperation>> ClaimPendingAsync(
+            int batchSize,
+            CancellationToken cancellationToken = default)
+        {
+            ClaimCount++;
+
+            if (_batches.Count == 0)
+            {
+                return Task.FromResult<IReadOnlyList<MiniBusOutboxStoredOperation>>(
+                    Array.Empty<MiniBusOutboxStoredOperation>());
+            }
+
+            return Task.FromResult(_batches.Dequeue());
         }
 
         public Task MarkDispatchedAsync(Guid operationId, CancellationToken cancellationToken = default)
@@ -522,6 +1140,81 @@ public sealed class SqlPersistenceTests
 
             Dispatched.Add(operation);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CustomDispatchSignal : ISqlMiniBusOutboxDispatchSignal
+    {
+        public void Wake()
+        {
+        }
+
+        public ValueTask<bool> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(false);
+        }
+    }
+
+    private sealed class CoordinatedDispatchSignal : ISqlMiniBusOutboxDispatchSignal
+    {
+        public TaskCompletionSource WaitEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool CancellationObserved { get; private set; }
+
+        public void Wake()
+        {
+        }
+
+        public async ValueTask<bool> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            WaitEntered.TrySetResult();
+
+            try
+            {
+                await Task.Delay(timeout, cancellationToken);
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+        }
+    }
+
+    private sealed class FailingThenCoordinatedDispatchSignal : ISqlMiniBusOutboxDispatchSignal
+    {
+        public TaskCompletionSource SecondWaitEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int WaitCount { get; private set; }
+
+        public bool CancellationObserved { get; private set; }
+
+        public void Wake()
+        {
+        }
+
+        public async ValueTask<bool> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            WaitCount++;
+
+            if (WaitCount == 1)
+            {
+                throw new InvalidOperationException("signal failed");
+            }
+
+            SecondWaitEntered.TrySetResult();
+
+            try
+            {
+                await Task.Delay(timeout, cancellationToken);
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved = true;
+                throw;
+            }
         }
     }
 }
