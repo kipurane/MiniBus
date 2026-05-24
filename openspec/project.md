@@ -3,8 +3,8 @@
 ## 1. Project summary
 
 **Project name:** MiniBus  
-**Primary language:** C# 10  
-**Primary runtime target:** .NET 10 with C# 10 language features  
+**Primary language:** C#  
+**Primary runtime target:** .NET 10, with `LangVersion=latest` where project files opt in  
 **Primary hosting model:** Azure Functions isolated worker  
 **Primary transport:** Azure Service Bus  
 **Current persistence options:** SQL Server / Azure SQL, Azure Blob Storage<br>
@@ -26,6 +26,7 @@ MiniBus should provide:
 - Optional saga/state-machine support, with core abstractions before production persistence.
 - Optional Azure Storage support for large payloads and low-cost metadata.
 - Observability through structured logging and OpenTelemetry-friendly activities.
+- Roslyn analyzers, source-generated Function wrappers, project templates, and handler testing helpers.
 
 ---
 
@@ -79,9 +80,9 @@ Invoke application handlers
         ↓
 Persist inbox/outbox/saga state when configured
         ↓
-Dispatch outgoing messages directly or through an outbox
+Dispatch outgoing messages directly, or capture them into SQL outbox
         ↓
-Complete, abandon, defer, schedule retry, or dead-letter
+Complete, schedule retry, dead-letter, or propagate failure
 ```
 
 ---
@@ -122,79 +123,80 @@ Complete, abandon, defer, schedule retry, or dead-letter
 │ │ Azure Service │     │ SQL           │     │ Azure       │ │
 │ │ Bus adapter   │     │ persistence   │     │ Storage     │ │
 │ │               │     │               │     │ persistence │ │
-│ │ Send          │     │ Inbox         │     │ Blob data   │ │
-│ │ Publish       │     │ Outbox        │     │ Table state │ │
+│ │ Send          │     │ Inbox         │     │ Blob payload│ │
+│ │ Publish       │     │ Outbox        │     │ Claim check │ │
 │ │ Schedule      │     │ Saga state    │     │ Audit blobs │ │
 │ └───────────────┘     └───────────────┘     └─────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+When SQL outbox is enabled, dispatch is a separate application-owned activity over `SqlMiniBusOutboxDispatcher`. Supported scheduling models include manual commands, optional hosted-service dispatch for worker-style hosts, and the active backlog item for a timer-triggered Azure Functions dispatcher.
+
 ---
 
 ## 5. Project/package layout
 
-Target solution structure. The current implementation includes the core, Azure Service Bus, Azure Functions, SQL persistence, Azure Storage persistence, observability, testing helpers, and the buildable Function App sample. Additional samples and deferred persistence options remain planned work.
+Current solution structure. The implementation includes core messaging, Azure Service Bus transport, Azure Functions processing, source-generated Function wrappers, analyzers, SQL persistence, Azure Storage persistence, testing helpers, templates, and local reference samples. Some older conceptual package names, such as a standalone observability package, were folded into the runtime packages instead of becoming separate projects.
 
 ```text
 MiniBus.sln
 
 /src
   /MiniBus.Core
+    Auditing
+    ClaimCheck
     Contracts
     Context
-    Dispatching
     Handlers
     Headers
-    Pipeline
-    Routing
-    Serialization
+    Persistence
     Recoverability
+    Routing
+    Sagas
+    Serialization
 
   /MiniBus.AzureServiceBus
-    Sending
-    Publishing
-    Scheduling
+    Dispatching
+    Recoverability
+    Routing
     TransportMessageMapping
 
   /MiniBus.AzureFunctions
+    DependencyInjection
     Processing
-    FunctionAdapters
     Settlement
 
+  /MiniBus.AzureFunctions.SourceGenerators
+
+  /MiniBus.Analyzers
+
   /MiniBus.Persistence.Sql
-    Inbox
-    Outbox
-    Sagas
-    Migrations
-    TransactionManagement
+    DependencyInjection
+    Schema
 
   /MiniBus.Persistence.AzureStorage
-    Tables
-    Blobs
-    DataBus
-    Audit
-
-  /MiniBus.Observability
-    Logging
-    Tracing
-    Metrics
+    DependencyInjection
 
   /MiniBus.Testing
-    TestableMiniBusContext
-    FakeBus
-    HandlerTestHarness
+
+  /MiniBus.Templates
 
 /samples
-  /MiniBus.Samples.Billing
-  /MiniBus.Samples.Inventory
+  /MiniBus.Samples.Contracts
   /MiniBus.Samples.FunctionApp
+  /MiniBus.Samples.Inventory.FunctionApp
 
 /tests
+  /MiniBus.AcceptanceTests
+  /MiniBus.Analyzers.Tests
   /MiniBus.Core.Tests
   /MiniBus.AzureServiceBus.Tests
   /MiniBus.AzureFunctions.Tests
+  /MiniBus.AzureFunctions.SourceGenerators.Tests
+  /MiniBus.Persistence.AzureStorage.Tests
   /MiniBus.Persistence.Sql.Tests
-  /MiniBus.IntegrationTests
+  /MiniBus.Templates.Tests
+  /MiniBus.Testing.Tests
 
 /openspec
   project.md
@@ -218,6 +220,8 @@ One set of handlers
 One endpoint name
 One persistence configuration
 ```
+
+SQL outbox dispatch can live outside the endpoint Function App. For production-style clarity, a separate timer-triggered dispatcher Function App can own draining the endpoint's SQL outbox while the processing Function App owns Service Bus trigger handling.
 
 Example:
 
@@ -352,8 +356,9 @@ Important design decision:
 
 - `Send`, `Publish`, and `Schedule` do not necessarily send immediately.
 - When outbox is enabled, outgoing operations are captured and persisted first.
-- Dispatching happens after successful business processing.
-- Until the outbox package exists, the Azure Functions adapter dispatches outgoing operations directly through the Azure Service Bus transport.
+- Dispatching happens only after successful business processing and SQL commit.
+- When SQL outbox is not enabled, the Azure Functions adapter dispatches outgoing operations directly through the Azure Service Bus transport.
+- When SQL outbox is enabled, applications choose the drain scheduler: manual command, hosted service, dedicated worker process, or timer-triggered Function.
 
 ---
 
@@ -725,8 +730,26 @@ Outbox processing:
 2. MiniBus records outgoing operation in memory.
 3. MiniBus persists outgoing operations to MiniBusOutbox inside SQL transaction.
 4. SQL transaction commits.
-5. MiniBus dispatches outgoing messages.
-6. MiniBus marks outbox row as dispatched.
+5. A dispatcher claims committed outbox rows later.
+6. The dispatcher sends outgoing messages through the configured transport.
+7. MiniBus marks outbox rows as dispatched.
+```
+
+Dispatcher scheduling choices:
+
+```text
+Manual command:
+  Application resolves SqlMiniBusOutboxDispatcher and drains on demand.
+
+Hosted service:
+  AddMiniBusSqlHostedOutboxDispatch registers an opt-in BackgroundService.
+
+Timer-triggered Function:
+  Active backlog item. Preferred first Azure Functions-native automatic drain shape,
+  especially as a separate dispatcher Function App for production-style clarity.
+
+Dedicated worker:
+  Application hosts the same dispatcher in an independently scaled process.
 ```
 
 Crash behavior:
@@ -847,7 +870,7 @@ Optional SQL timeout table with dispatcher.
 
 ---
 
-## 18. Large payloads / DataBus / Claim Check
+## 18. Large payloads / Claim Check
 
 Service Bus messages should stay small.
 
@@ -856,19 +879,23 @@ MiniBus should support optional claim-check behavior:
 ```text
 If serialized body exceeds configured threshold:
   1. Store payload in Azure Blob Storage.
-  2. Replace message body with pointer metadata.
-  3. Add MiniBus.DataBus.BlobUri or BlobName header.
+  2. Replace message body with compact claim-check envelope metadata.
+  3. Add MiniBus.ClaimCheck.* headers.
   4. Receiver downloads payload before deserialization.
 ```
 
 Configuration example:
 
 ```csharp
-options.DataBus.UseAzureBlobStorage(blob =>
-{
-    blob.ContainerName = "minibus-payloads";
-    blob.PayloadThresholdBytes = 128 * 1024;
-});
+services.AddMiniBusAzureStoragePersistence(
+    connectionString,
+    containerName: "minibus-payloads",
+    options =>
+    {
+        options.BlobNamePrefix = "payloads";
+        options.PayloadRetention = TimeSpan.FromDays(7);
+    })
+    .AddMiniBusAzureBlobClaimCheck(payloadThresholdBytes: 128 * 1024);
 ```
 
 ---
@@ -1167,7 +1194,7 @@ This phase should land before production inbox/outbox and observability so those
 
 ### Phase 7 — SQL persistence and production reliability
 
-Implement:
+Implemented baseline:
 
 - SQL connection abstraction.
 - First-class SQL Server/Azure SQL provider support with `Microsoft.Data.SqlClient`, connection-string registration, and SQL Server-backed integration tests.
@@ -1177,21 +1204,30 @@ Implement:
 - Outbox dispatch.
 - Deterministic outgoing message IDs for outbox replay.
 - SQL saga persistence.
-- Migration scripts or owned migration strategy.
+- Explicit SQL schema scripts.
 - Cleanup policy.
+- Optional hosted-service outbox dispatch.
+
+Active follow-up:
+
+- Timer-triggered Azure Functions SQL outbox dispatcher reference path.
 
 ### Phase 8 — Azure Storage support
 
-Implement:
+Implemented baseline:
 
 - Blob payload store.
+- Receive-side claim-check resolution.
+- Audit blob writer.
+
+Deferred:
+
 - Optional Table Storage inbox.
 - Optional Table Storage saga store.
-- Audit blob writer.
 
 ### Phase 9 — Observability
 
-Implement:
+Implemented inside the current runtime packages:
 
 - Structured logging integration.
 - OpenTelemetry-friendly activities.
@@ -1200,13 +1236,14 @@ Implement:
 
 ### Phase 10 — Developer experience
 
-Implement:
+Implemented baseline:
 
 - Source generator for function wrappers.
 - Roslyn analyzers.
 - Templates.
 - Sample apps.
 - Documentation.
+- Testing helpers.
 
 ---
 
@@ -1242,6 +1279,8 @@ Saga timeout support now uses Service Bus scheduled messages, with SQL outbox ca
 - [x] Decide whether migrations are framework-owned or shipped as SQL scripts.
 - [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
 - [x] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
+- [x] Add opt-in hosted-service SQL outbox dispatch with bounded cycles, startup drain, failure backoff, best-effort wake-up, graceful shutdown behavior, and tests.
+- [ ] Add a timer-triggered Azure Functions SQL outbox dispatcher reference path, preferably as a separate dispatcher Function App while documenting the colocated timer option.
 
 ### 24.3 Saga follow-ups
 
@@ -1259,7 +1298,7 @@ Basic saga contracts, correlation, invocation, in-memory persistence, SQL persis
 
 - [x] Create `MiniBus.Persistence.AzureStorage` or equivalent storage package.
 - [x] Implement Blob payload store.
-- [x] Implement large payload/DataBus/claim-check support.
+- [x] Implement large payload claim-check support.
 - [x] Add receive-side claim-check resolution before deserialization.
 - [x] Implement audit blob writer.
 - [x] Add Testcontainers-backed Azurite or live-resource-gated integration tests for Blob payload storage.
@@ -1286,6 +1325,7 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
 - [x] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
 - [ ] Rename the Billing sample Function App from `MiniBus.Samples.FunctionApp` to `MiniBus.Samples.Billing.FunctionApp` so it aligns with the Inventory endpoint sample naming.
+- [ ] Add the timer-triggered SQL outbox dispatcher sample from `openspec/changes/add-timer-triggered-sql-outbox-dispatch`.
 - [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
@@ -1439,58 +1479,38 @@ public sealed class BillingInputFunction
 
 ---
 
-## 29. Open questions
+## 29. Current planning questions
 
-These should be decided before or during early implementation.
+Resolved early questions:
 
-1. Should MiniBus target only Azure Functions isolated worker, or also generic worker services?
-2. Should MiniBus stay `net10.0`-first or multi-target older supported LTS frameworks?
-3. Should SQL persistence use raw ADO.NET, Dapper, or EF Core?
-4. Should business data and MiniBus persistence be required to use the same database connection?
-5. Should event topology default to one shared topic or one topic per event type?
-6. Should sessions be first-class in MVP or deferred?
-7. Should source generation be part of MVP or a later developer experience feature?
-8. Should the framework own database migrations or expose SQL scripts only?
-9. Should message schema versioning be part of the MVP?
-10. Should the outbox dispatcher run inside message processing only, or also as a separate timer-triggered function?
+1. MiniBus is `net10.0`-first for runtime packages, with analyzers/source generators targeting `netstandard2.0`.
+2. SQL persistence uses raw ADO.NET and `Microsoft.Data.SqlClient`, not Dapper or EF Core.
+3. SQL schema is shipped as explicit scripts rather than framework-owned runtime migrations.
+4. Source generation is part of the developer-experience baseline, while manual wrappers remain supported.
+5. SQL outbox dispatch is separate from message processing; supported scheduling models include manual drains, hosted-service drains, dedicated workers, and the active timer-triggered Functions backlog item.
+
+Open or deferred questions:
+
+1. Should runtime packages eventually multi-target older supported LTS frameworks?
+2. Should Service Bus sessions become first-class when ordering or saga-heavy workflows need them?
+3. Should event topology remain a shared topic with subscriptions, or should a one-topic-per-event-type topology be added?
+4. Should message schema versioning become a first-class MiniBus concern?
+5. Should optional Azure Table Storage inbox/saga persistence become a SQL-free reliability mode?
 
 ---
 
-## 30. First OpenSpec change suggestion
+## 30. Active OpenSpec changes
 
-Suggested first OpenSpec change:
+Current active changes:
 
 ```text
-openspec/changes/add-core-message-processing/
-  proposal.md
-  design.md
-  tasks.md
-  specs/
-    minibus-core/spec.md
+add-timer-triggered-sql-outbox-dispatch
 ```
 
-Initial capability:
+Completed but not yet archived changes:
 
 ```text
-Capability: MiniBus core message processing
-
-The framework shall provide message contracts, handler discovery,
-message serialization, routing, and handler invocation independent
-of Azure Functions and Azure Service Bus transport concerns.
-```
-
-Suggested first implementation tasks:
-
-```text
-1. Create MiniBus.Core project.
-2. Add IMessage, ICommand, IEvent.
-3. Add IHandleMessages<TMessage>.
-4. Add MiniBusContext abstraction.
-5. Add routing registry.
-6. Add System.Text.Json serializer.
-7. Add handler registry and handler invoker.
-8. Add unit tests for handler discovery and invocation.
-9. Add basic sample handler.
+add-sql-outbox-hosted-dispatch
 ```
 
 ---

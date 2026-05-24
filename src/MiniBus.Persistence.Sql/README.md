@@ -70,6 +70,22 @@ var dispatched = await dispatcher.DispatchPendingAsync(cancellationToken);
 var dispatched = await dispatcher.DispatchPendingBatchesAsync(maxBatches: 10, cancellationToken);
 ```
 
+### Choosing an outbox dispatch host
+
+All dispatch hosting models use the same durable primitive: `SqlMiniBusOutboxDispatcher` claims committed SQL rows, dispatches through the configured transport, and records success or failure metadata. Choose the host based on operational ownership and latency needs:
+
+| Dispatch host | Wake-up behavior | Recommended use |
+| --- | --- | --- |
+| Manual command or maintenance job | Runs only when invoked | Tests, local troubleshooting, scripted drains, custom schedulers |
+| Same process hosted service | Best-effort in-process wake-up after successful MiniBus-owned commits, plus polling | Single-process hosts that intentionally want low-latency automatic draining in the processing host |
+| Timer-triggered Azure Function in the processing Function App | Timer cadence | Small Azure Functions deployments that want one host boundary and explicit trigger scheduling |
+| Separate timer-triggered dispatcher Function App | Timer cadence | Production-style Azure Functions deployments where processing and outbox draining should be deployed, scaled, observed, and restarted independently |
+| Separate worker or hosted service process | Poll interval unless the app adds its own signal | Dedicated dispatcher ownership outside Azure Functions |
+
+The same-process hosted service can feel nearly instant because MiniBus wakes the local dispatcher after the SQL transaction commits. That wake-up is a process-local hint, not part of the SQL transaction and not a correctness mechanism. A separate dispatcher app does not receive that built-in in-memory wake-up from the handler app; it discovers committed rows through its timer or polling cadence. Both shapes remain correct because SQL claims and claim-lease recovery coordinate the real work.
+
+Avoid running multiple scheduler types for the same outbox unless that is a deliberate scale-out or recovery choice. Multiple dispatchers can coexist because SQL claims coordinate rows, but outgoing delivery remains at-least-once after crash windows.
+
 Single-process hosts can opt into automatic hosted dispatch after SQL persistence registration:
 
 ```csharp

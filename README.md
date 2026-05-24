@@ -173,6 +173,8 @@ Hosted dispatch wakes best-effort after successful MiniBus-owned SQL commits, po
 
 Advanced hosts can register a custom `ISqlMiniBusOutboxDispatchSignal` before enabling hosted dispatch when they need to coordinate the in-process wake-up path themselves.
 
+For Azure Functions, treat hosted dispatch, timer-triggered dispatch, and separate dispatcher apps as hosting choices over the same `SqlMiniBusOutboxDispatcher`. Same-process hosted dispatch gets the built-in best-effort wake-up; separate dispatcher apps discover work through timer or polling cadence. The package README has the detailed decision guide.
+
 Cleanup is explicit and retention-based:
 
 ```csharp
