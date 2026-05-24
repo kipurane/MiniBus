@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public static class BillingSampleServiceBusConnection
 {

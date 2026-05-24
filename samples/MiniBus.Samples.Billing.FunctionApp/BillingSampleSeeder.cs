@@ -4,7 +4,7 @@ using MiniBus.Core.Serialization;
 using MiniBus.Samples.Contracts.Billing;
 using CoreHeaderNames = MiniBus.Core.Headers.MiniBusHeaderNames;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public static class BillingSampleSeeder
 {

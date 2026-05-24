@@ -19,7 +19,7 @@ The script starts Azure Functions Core Tools on port `7072` by default so it can
 Seed the workflow through the Billing sample:
 
 ```bash
-./samples/MiniBus.Samples.FunctionApp/seed-local.sh
+./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
 ```
 
 Inventory should log that `ReserveInventoryHandler` reserved the sample SKU for the seeded invoice.

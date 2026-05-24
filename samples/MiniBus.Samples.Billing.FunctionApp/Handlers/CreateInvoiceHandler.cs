@@ -4,7 +4,7 @@ using MiniBus.Core.Handlers;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
 
-namespace MiniBus.Samples.FunctionApp.Handlers;
+namespace MiniBus.Samples.Billing.FunctionApp.Handlers;
 
 public sealed partial class CreateInvoiceHandler : IHandleMessages<CreateInvoice>
 {

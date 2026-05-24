@@ -13,10 +13,10 @@ using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
-using MiniBus.Samples.FunctionApp.Handlers;
-using MiniBus.Samples.FunctionApp.Sagas;
+using MiniBus.Samples.Billing.FunctionApp.Handlers;
+using MiniBus.Samples.Billing.FunctionApp.Sagas;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public static class MiniBusFunctionAppConfiguration
 {

@@ -43,7 +43,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "archive", "archive", "{7666
 		openspec\changes\archive\2026-05-08-add-basic-saga-support\tasks.md = openspec\changes\archive\2026-05-08-add-basic-saga-support\tasks.md
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.FunctionApp", "samples\MiniBus.Samples.FunctionApp\MiniBus.Samples.FunctionApp.csproj", "{B8BD1694-58DA-4E22-A3B4-2B9F24ACB40B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.Billing.FunctionApp", "samples\MiniBus.Samples.Billing.FunctionApp\MiniBus.Samples.Billing.FunctionApp.csproj", "{B8BD1694-58DA-4E22-A3B4-2B9F24ACB40B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Persistence.AzureStorage.Tests", "tests\MiniBus.Persistence.AzureStorage.Tests\MiniBus.Persistence.AzureStorage.Tests.csproj", "{354C9126-C812-4AFB-BD33-7B6B6B99629E}"
 EndProject

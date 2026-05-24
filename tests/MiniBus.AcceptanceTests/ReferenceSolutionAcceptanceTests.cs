@@ -15,8 +15,8 @@ using MiniBus.Persistence.Sql;
 using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
-using MiniBus.Samples.FunctionApp;
-using MiniBus.Samples.FunctionApp.Sagas;
+using MiniBus.Samples.Billing.FunctionApp;
+using MiniBus.Samples.Billing.FunctionApp.Sagas;
 using MiniBus.Samples.Inventory.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 

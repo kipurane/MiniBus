@@ -2,7 +2,7 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.Azure.Functions.Worker;
 using MiniBus.AzureFunctions.Processing;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public sealed class BillingEventsFunction
 {

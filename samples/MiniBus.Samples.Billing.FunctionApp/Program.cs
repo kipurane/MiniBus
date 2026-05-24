@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public static class Program
 {

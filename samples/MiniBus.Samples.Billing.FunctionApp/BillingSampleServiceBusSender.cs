@@ -2,7 +2,7 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Logging;
 using MiniBus.AzureServiceBus.Dispatching;
 
-namespace MiniBus.Samples.FunctionApp;
+namespace MiniBus.Samples.Billing.FunctionApp;
 
 public sealed partial class BillingSampleServiceBusSender : IAzureServiceBusSender, IAsyncDisposable
 {

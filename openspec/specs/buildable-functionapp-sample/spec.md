@@ -4,15 +4,23 @@
 Defines the buildable Azure Functions sample application that demonstrates the stable MiniBus setup path with Service Bus transport, handler business logic, recoverability, and optional saga processing.
 ## Requirements
 ### Requirement: Function App sample is buildable
-MiniBus SHALL provide a buildable Azure Functions isolated worker sample project under `samples/MiniBus.Samples.FunctionApp`.
+MiniBus SHALL provide a buildable Azure Functions isolated worker Billing sample project under `samples/MiniBus.Samples.Billing.FunctionApp`.
 
 #### Scenario: Sample project builds with the solution
 - **WHEN** the solution is built or tested
-- **THEN** the sample project compiles against the current MiniBus project references
+- **THEN** the Billing sample project compiles against the current MiniBus project references
 
 #### Scenario: Sample project is included in the solution
 - **WHEN** a developer opens `MiniBus.sln`
-- **THEN** the Function App sample appears as a project rather than only loose solution items
+- **THEN** the Billing Function App sample appears as `MiniBus.Samples.Billing.FunctionApp` rather than only loose solution items
+
+#### Scenario: Billing sample uses endpoint-specific identity
+- **WHEN** a developer inspects the Billing sample directory, project file, assembly output, or root namespace
+- **THEN** each uses the endpoint-specific `MiniBus.Samples.Billing.FunctionApp` identity instead of the generic `MiniBus.Samples.FunctionApp` identity
+
+#### Scenario: Billing and Inventory sample names align
+- **WHEN** a developer compares the sample endpoint projects
+- **THEN** Billing uses `MiniBus.Samples.Billing.FunctionApp` and Inventory uses `MiniBus.Samples.Inventory.FunctionApp`
 
 ### Requirement: Sample demonstrates host registration hook
 The Function App sample SHALL show a complete Azure Functions isolated worker host path that registers MiniBus while keeping the Billing registration logic readable for a real host or reusable project template.

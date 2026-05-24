@@ -65,7 +65,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - `src/MiniBus.Analyzers`: optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
 - `src/MiniBus.Templates`: `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
-- `samples/MiniBus.Samples.FunctionApp`: emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, saga setup, and an opt-in SQL-backed reliability path.
+- `samples/MiniBus.Samples.Billing.FunctionApp`: emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, saga setup, and an opt-in SQL-backed reliability path.
 - `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## Golden Path

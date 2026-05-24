@@ -2,7 +2,7 @@ using MiniBus.Core.Context;
 using MiniBus.Core.Sagas;
 using MiniBus.Samples.Contracts.Billing;
 
-namespace MiniBus.Samples.FunctionApp.Sagas;
+namespace MiniBus.Samples.Billing.FunctionApp.Sagas;
 
 public sealed class BillingSagaData : ISagaData
 {

@@ -1,4 +1,4 @@
-# MiniBus.Samples.FunctionApp
+# MiniBus.Samples.Billing.FunctionApp
 
 This sample is the runnable Billing reference workflow for MiniBus. Together with the sibling Inventory Function App under `samples/MiniBus.Samples.Inventory.FunctionApp`, it shows a focused two-endpoint local path through Azure Service Bus transport:
 
@@ -17,7 +17,7 @@ This sample is the runnable Billing reference workflow for MiniBus. Together wit
 The samples still build without running local infrastructure:
 
 ```bash
-dotnet build samples/MiniBus.Samples.FunctionApp/MiniBus.Samples.FunctionApp.csproj
+dotnet build samples/MiniBus.Samples.Billing.FunctionApp/MiniBus.Samples.Billing.FunctionApp.csproj
 dotnet build samples/MiniBus.Samples.Inventory.FunctionApp/MiniBus.Samples.Inventory.FunctionApp.csproj
 ```
 
@@ -33,13 +33,13 @@ Prerequisites:
 The Billing sample runner starts the local infrastructure, waits for the Service Bus emulator to load the reference topology, checks the emulator and Azurite ports, then starts the Billing Function App in the foreground:
 
 ```bash
-ACCEPT_EULA=Y ./samples/MiniBus.Samples.FunctionApp/run-local.sh
+ACCEPT_EULA=Y ./samples/MiniBus.Samples.Billing.FunctionApp/run-local.sh
 ```
 
 The script requires `ACCEPT_EULA=Y` so the Azure Service Bus emulator and SQL Server license acceptance is explicit. To start the pieces manually instead, start the compose stack first:
 
 ```bash
-cd samples/MiniBus.Samples.FunctionApp/servicebus-emulator
+cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
 ACCEPT_EULA=Y docker compose up -d
 ```
 
@@ -54,7 +54,7 @@ Continue after the emulator logs `User defined entities created for SB Emulator`
 Run the Billing Function App from the sample directory:
 
 ```bash
-cd samples/MiniBus.Samples.FunctionApp
+cd samples/MiniBus.Samples.Billing.FunctionApp
 func start
 ```
 
@@ -74,10 +74,10 @@ func start --port 7072
 In a third terminal, seed the first Billing command through the repo-owned sender path:
 
 ```bash
-./samples/MiniBus.Samples.FunctionApp/seed-local.sh
+./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
 ```
 
-If that terminal is already in `samples/MiniBus.Samples.FunctionApp`, use `./seed-local.sh`. The seed script builds the sample and invokes its compiled DLL directly because Azure Functions build targets redirect `dotnet run` for this project into `func host start`.
+If that terminal is already in `samples/MiniBus.Samples.Billing.FunctionApp`, use `./seed-local.sh`. The seed script builds the sample and invokes its compiled DLL directly because Azure Functions build targets redirect `dotnet run` for this project into `func host start`.
 
 The seed command sends `CreateInvoice` to the emulator-backed `billing-queue` with MiniBus message-type, message-id, content-type, and correlation metadata. The running Functions hosts should then show:
 
@@ -127,7 +127,7 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 1. Start the local infrastructure without starting the Function App yet:
 
    ```bash
-   cd samples/MiniBus.Samples.FunctionApp/servicebus-emulator
+   cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
    ACCEPT_EULA=Y docker compose up -d --force-recreate
    ```
 
@@ -136,7 +136,7 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 2. From the repository root, apply the packaged MiniBus SQL scripts to the configured Billing SQL database:
 
    ```bash
-   ./samples/MiniBus.Samples.FunctionApp/apply-sql-schema-local.sh
+   ./samples/MiniBus.Samples.Billing.FunctionApp/apply-sql-schema-local.sh
    ```
 
    The command applies every MiniBus SQL schema script copied into the sample output under `Schema/` in filename order. MiniBus does not apply those scripts automatically when SQL persistence is enabled.
@@ -144,7 +144,7 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 3. Start the Billing Function App with SQL persistence enabled:
 
    ```bash
-   cd samples/MiniBus.Samples.FunctionApp
+   cd samples/MiniBus.Samples.Billing.FunctionApp
    BillingSqlEnabled=true func start
    ```
 
@@ -157,13 +157,13 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 5. From the repository root, seed the same Billing command from another terminal:
 
    ```bash
-   ./samples/MiniBus.Samples.FunctionApp/seed-local.sh
+   ./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
    ```
 
 6. From the repository root, drain the outbox after `BillingInputFunction` has processed the command:
 
    ```bash
-   ./samples/MiniBus.Samples.FunctionApp/drain-outbox-local.sh
+   ./samples/MiniBus.Samples.Billing.FunctionApp/drain-outbox-local.sh
    ```
 
    The first drain sends the captured receipt command, `ReserveInventory` command, and `InvoiceCreated` event through the configured Service Bus routes. After `BillingEventsFunction` processes the event, run the drain command again to dispatch the captured `InvoicePaymentTimeout` schedule. The command reports how many pending Billing outbox operations were dispatched each time.

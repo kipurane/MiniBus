@@ -8,7 +8,7 @@ using MiniBus.Core.Headers;
 using MiniBus.Core.Serialization;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
-using MiniBus.Samples.FunctionApp;
+using MiniBus.Samples.Billing.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 using Xunit.Sdk;
@@ -28,11 +28,11 @@ public sealed class ServiceBusEmulatorBillingWorkflowTests
     private const string ReceiveTimeoutSecondsEnvironmentVariable = "MINIBUS_SERVICEBUS_EMULATOR_RECEIVE_TIMEOUT_SECONDS";
     private static readonly string[] SampleFunctionHostProcessMarkers =
     [
-        "samples/MiniBus.Samples.FunctionApp/bin/",
-        "samples\\MiniBus.Samples.FunctionApp\\bin\\",
+        "samples/MiniBus.Samples.Billing.FunctionApp/bin/",
+        "samples\\MiniBus.Samples.Billing.FunctionApp\\bin\\",
         "samples/MiniBus.Samples.Inventory.FunctionApp/bin/",
         "samples\\MiniBus.Samples.Inventory.FunctionApp\\bin\\",
-        "MiniBus.Samples.FunctionApp.dll",
+        "MiniBus.Samples.Billing.FunctionApp.dll",
         "MiniBus.Samples.Inventory.FunctionApp.dll"
     ];
 

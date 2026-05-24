@@ -11,7 +11,7 @@ if [[ "${ACCEPT_EULA:-}" != "Y" ]]; then
 Set ACCEPT_EULA=Y to accept the Azure Service Bus emulator and SQL Server container license terms.
 
 Example:
-  ACCEPT_EULA=Y ./samples/MiniBus.Samples.FunctionApp/run-local.sh
+  ACCEPT_EULA=Y ./samples/MiniBus.Samples.Billing.FunctionApp/run-local.sh
 EOF
   exit 1
 fi
@@ -97,7 +97,7 @@ Start the Inventory Function App from another terminal with:
   ./samples/MiniBus.Samples.Inventory.FunctionApp/run-local.sh
 
 Seed the first command from a third terminal with:
-  ./samples/MiniBus.Samples.FunctionApp/seed-local.sh
+  ./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
 EOF
 
 cd "$sample_root"

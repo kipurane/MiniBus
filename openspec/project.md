@@ -183,7 +183,7 @@ MiniBus.sln
 
 /samples
   /MiniBus.Samples.Contracts
-  /MiniBus.Samples.FunctionApp
+  /MiniBus.Samples.Billing.FunctionApp
   /MiniBus.Samples.Inventory.FunctionApp
 
 /tests
@@ -1324,7 +1324,6 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
 - [x] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
 - [x] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
-- [ ] Rename the Billing sample Function App from `MiniBus.Samples.FunctionApp` to `MiniBus.Samples.Billing.FunctionApp` so it aligns with the Inventory endpoint sample naming.
 - [ ] Add the timer-triggered SQL outbox dispatcher sample from `openspec/changes/add-timer-triggered-sql-outbox-dispatch`.
 - [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
