@@ -1337,7 +1337,7 @@ Saga timeout support now uses Service Bus scheduled messages, with SQL outbox ca
 - [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
 - [x] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
 - [x] Add opt-in hosted-service SQL outbox dispatch with bounded cycles, startup drain, failure backoff, best-effort wake-up, graceful shutdown behavior, and tests.
-- [ ] Add a timer-triggered Azure Functions SQL outbox dispatcher reference path, preferably as a separate dispatcher Function App while documenting the colocated timer option.
+- [x] Merge timer-triggered Azure Functions SQL outbox dispatcher reference path into `openspec/changes/add-timer-triggered-sql-outbox-dispatch`; implementation is tracked in the developer experience backlog item below.
 
 ### 24.3 Saga follow-ups
 

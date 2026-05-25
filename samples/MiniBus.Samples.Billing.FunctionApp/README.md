@@ -11,6 +11,7 @@ This sample is the runnable Billing reference workflow for MiniBus. Together wit
 - real `ServiceBusClient` and `AzureServiceBusSender` registration
 - explicit Service Bus routes and recoverability settings
 - an opt-in SQL-backed reliability path for inbox, outbox, and saga state
+- a separate timer-triggered Billing SQL outbox dispatcher Function App
 
 ## Build
 
@@ -18,6 +19,7 @@ The samples still build without running local infrastructure:
 
 ```bash
 dotnet build samples/MiniBus.Samples.Billing.FunctionApp/MiniBus.Samples.Billing.FunctionApp.csproj
+dotnet build samples/MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp/MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp.csproj
 dotnet build samples/MiniBus.Samples.Inventory.FunctionApp/MiniBus.Samples.Inventory.FunctionApp.csproj
 ```
 
@@ -121,6 +123,7 @@ The default emulator workflow stays small and dispatches outgoing work directly.
 - outgoing receipt commands, Inventory commands, `InvoiceCreated` publications, and timeout schedules are captured in the SQL outbox
 - `BillingSaga` state uses SQL saga persistence instead of the sample in-memory saga store
 - outbox draining remains an application-owned step
+- automatic Functions-native outbox draining can run in the sibling `MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp`
 
 The sample compose file exposes its SQL Server dependency on `localhost:14333` for this reference path. The local `BillingSql` value in `local.settings.json` targets the `master` database in that disposable emulator SQL Server container; set `BillingSql` to a different SQL Server/Azure SQL connection string when the sample should apply scripts to an application-owned database instead.
 
@@ -160,7 +163,9 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
    ./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
    ```
 
-6. From the repository root, drain the outbox after `BillingInputFunction` has processed the command:
+6. Drain the outbox after `BillingInputFunction` has processed the command.
+
+   For local troubleshooting or scripted acceptance paths, run the manual drain command from the repository root:
 
    ```bash
    ./samples/MiniBus.Samples.Billing.FunctionApp/drain-outbox-local.sh
@@ -168,7 +173,19 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 
    The first drain sends the captured receipt command, `ReserveInventory` command, and `InvoiceCreated` event through the configured Service Bus routes. After `BillingEventsFunction` processes the event, run the drain command again to dispatch the captured `InvoicePaymentTimeout` schedule. The command reports how many pending Billing outbox operations were dispatched each time.
 
+   For the preferred Azure Functions reference shape, run the separate timer-triggered dispatcher Function App instead:
+
+   ```bash
+   ./samples/MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp/run-local.sh
+   ```
+
+   The dispatcher app uses the same Billing SQL and Service Bus settings as the processing app, resolves `SqlMiniBusOutboxDispatcher`, and runs a bounded drain on the `BillingOutboxDispatchSchedule` timer. Its default local schedule runs every 15 seconds with `BillingOutboxDispatchMaxBatches=5`.
+
 Set `BillingSql` before `apply-sql-schema-local.sh`, `func start`, and `drain-outbox-local.sh` when the SQL-backed workflow should use another connection string. Set `BillingSqlSchema` only after adapting the schema scripts for that schema through the application deployment flow; the sample schema command intentionally applies the packaged default `MiniBus` schema scripts unchanged.
+
+Set the same `BillingSql`, `BillingSqlSchema`, `ServiceBus`, `BillingOutboxDispatchSchedule`, and `BillingOutboxDispatchMaxBatches` values for `MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp` when it runs as a separate host. Keeping the dispatcher separate makes the production-style ownership visible: the Billing processing app owns Service Bus triggers and SQL commits, while the dispatcher app owns scheduled outbox draining. Small deployments can colocate an equivalent timer-triggered function in the Billing processing app when one host boundary is an intentional tradeoff.
+
+Timer cadence is an application choice. Shorter intervals reduce time-to-dispatch but increase idle polling. Longer intervals reduce idle work but leave committed outbox rows pending longer. Multiple dispatcher instances are safe because SQL claims coordinate rows and abandoned claims become eligible again after the claim lease expires; outgoing delivery remains at-least-once, so receivers should stay idempotent and broker duplicate detection should be used where available.
 
 ## Verification
 

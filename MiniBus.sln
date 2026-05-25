@@ -71,6 +71,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.Inventory.F
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.Billing.FunctionApp", "samples\MiniBus.Samples.Billing.FunctionApp\MiniBus.Samples.Billing.FunctionApp.csproj", "{A41B1A64-AD22-47CB-A44B-FE827F3D5E6C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp", "samples\MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp\MiniBus.Samples.Billing.OutboxDispatcher.FunctionApp.csproj", "{38815C43-A7F2-4392-9A7D-2696CBE1118A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -345,6 +347,18 @@ Global
 		{A41B1A64-AD22-47CB-A44B-FE827F3D5E6C}.Release|x64.Build.0 = Release|Any CPU
 		{A41B1A64-AD22-47CB-A44B-FE827F3D5E6C}.Release|x86.ActiveCfg = Release|Any CPU
 		{A41B1A64-AD22-47CB-A44B-FE827F3D5E6C}.Release|x86.Build.0 = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|x64.Build.0 = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Debug|x86.Build.0 = Debug|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|x64.ActiveCfg = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|x64.Build.0 = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|x86.ActiveCfg = Release|Any CPU
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -375,5 +389,6 @@ Global
 		{A6432B12-5E3D-4DA8-9F49-4C1D253269A5} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
 		{90093C0F-0B66-4A9F-8E39-2CE1C567D3F3} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
 		{A41B1A64-AD22-47CB-A44B-FE827F3D5E6C} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
+		{38815C43-A7F2-4392-9A7D-2696CBE1118A} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
 	EndGlobalSection
 EndGlobal

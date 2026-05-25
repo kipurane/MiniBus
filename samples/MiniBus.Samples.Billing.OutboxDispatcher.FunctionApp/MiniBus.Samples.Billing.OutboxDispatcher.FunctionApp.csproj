@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AzureFunctionsVersion>v4</AzureFunctionsVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.3.1" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.5" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MiniBus.Samples.Contracts\MiniBus.Samples.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.Core\MiniBus.Core.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.AzureFunctions\MiniBus.AzureFunctions.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.AzureServiceBus\MiniBus.AzureServiceBus.csproj" />
+    <ProjectReference Include="..\..\src\MiniBus.Persistence.Sql\MiniBus.Persistence.Sql.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\BillingSampleServiceBusConnection.cs" Link="Shared\BillingSampleServiceBusConnection.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\BillingSampleServiceBusSender.cs" Link="Shared\BillingSampleServiceBusSender.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\BillingSampleSqlWorkflow.cs" Link="Shared\BillingSampleSqlWorkflow.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\BillingTopology.cs" Link="Shared\BillingTopology.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\Handlers\CreateInvoiceHandler.cs" Link="Shared\Handlers\CreateInvoiceHandler.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\MiniBusFunctionAppConfiguration.cs" Link="Shared\MiniBusFunctionAppConfiguration.cs" />
+    <Compile Include="..\MiniBus.Samples.Billing.FunctionApp\Sagas\BillingSaga.cs" Link="Shared\Sagas\BillingSaga.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MiniBus.AcceptanceTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="host.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="local.settings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <None Include="..\..\src\MiniBus.Persistence.Sql\Schema\*.sql"
+          Link="Schema\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

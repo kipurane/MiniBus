@@ -70,6 +70,30 @@ var dispatched = await dispatcher.DispatchPendingAsync(cancellationToken);
 var dispatched = await dispatcher.DispatchPendingBatchesAsync(maxBatches: 10, cancellationToken);
 ```
 
+Azure Functions timer triggers should keep the function body thin. Resolve `SqlMiniBusOutboxDispatcher` from dependency injection, choose an application-owned bounded drain size, and call the existing dispatcher API:
+
+```csharp
+public sealed class OutboxDispatcherFunction
+{
+    private readonly SqlMiniBusOutboxDispatcher _dispatcher;
+
+    public OutboxDispatcherFunction(SqlMiniBusOutboxDispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+    }
+
+    [Function("OutboxDispatcher")]
+    public Task Run(
+        [TimerTrigger("%OutboxDispatchSchedule%")] TimerInfo timer,
+        CancellationToken cancellationToken)
+    {
+        return _dispatcher.DispatchPendingBatchesAsync(maxBatches: 5, cancellationToken);
+    }
+}
+```
+
+The timer schedule and drain bound belong to the application, not to MiniBus runtime defaults. Short intervals lower latency but increase idle SQL polling. Larger `maxBatches` values drain bursts faster but can keep one timer invocation active longer. Scale-out is safe because dispatchers claim rows in SQL and abandoned claims recover after `OutboxClaimLeaseDuration`, but dispatch remains at-least-once after crash windows.
+
 ### Choosing an outbox dispatch host
 
 All dispatch hosting models use the same durable primitive: `SqlMiniBusOutboxDispatcher` claims committed SQL rows, dispatches through the configured transport, and records success or failure metadata. Choose the host based on operational ownership and latency needs:
