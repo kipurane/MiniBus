@@ -130,7 +130,7 @@ Complete, schedule retry, dead-letter, or propagate failure
 └─────────────────────────────────────────────────────────────┘
 ```
 
-When SQL outbox is enabled, dispatch is a separate application-owned activity over `SqlMiniBusOutboxDispatcher`. Supported scheduling models include manual commands, optional hosted-service dispatch for worker-style hosts, and the active backlog item for a timer-triggered Azure Functions dispatcher.
+When SQL outbox is enabled, dispatch is a separate application-owned activity over `SqlMiniBusOutboxDispatcher`. Supported scheduling models include manual commands, optional hosted-service dispatch for worker-style hosts, dedicated worker processes, and timer-triggered Azure Functions dispatchers.
 
 ---
 
@@ -1207,9 +1207,6 @@ Implemented baseline:
 - Explicit SQL schema scripts.
 - Cleanup policy.
 - Optional hosted-service outbox dispatch.
-
-Active follow-up:
-
 - Timer-triggered Azure Functions SQL outbox dispatcher reference path.
 
 ### Phase 8 — Azure Storage support
@@ -1337,7 +1334,7 @@ Saga timeout support now uses Service Bus scheduled messages, with SQL outbox ca
 - [x] Add SQL Server/Azure SQL integration tests for schema creation, inbox duplicate detection, outbox capture, outbox replay, transaction behavior, and cleanup.
 - [x] Add a high-level SQL outbox dispatch/drain acceptance test that processes the reference workflow, captures SQL outbox rows, runs `SqlMiniBusOutboxDispatcher.DispatchPendingAsync`, and verifies the configured transport receives the expected send, publish, and schedule operations.
 - [x] Add opt-in hosted-service SQL outbox dispatch with bounded cycles, startup drain, failure backoff, best-effort wake-up, graceful shutdown behavior, and tests.
-- [x] Merge timer-triggered Azure Functions SQL outbox dispatcher reference path into `openspec/changes/add-timer-triggered-sql-outbox-dispatch`; implementation is tracked in the developer experience backlog item below.
+- [x] Add timer-triggered Azure Functions SQL outbox dispatcher reference path and sample.
 
 ### 24.3 Saga follow-ups
 
@@ -1381,7 +1378,7 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Add a buildable Azure Functions billing sample project that demonstrates MiniBus registration, handler code, Service Bus routing, recoverability, and saga setup.
 - [x] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
 - [x] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
-- [ ] Add the timer-triggered SQL outbox dispatcher sample from `openspec/changes/add-timer-triggered-sql-outbox-dispatch`.
+- [x] Add the timer-triggered SQL outbox dispatcher sample.
 - [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
@@ -1563,7 +1560,7 @@ Resolved early questions:
 2. SQL persistence uses raw ADO.NET and `Microsoft.Data.SqlClient`, not Dapper or EF Core.
 3. SQL schema is shipped as explicit scripts rather than framework-owned runtime migrations.
 4. Source generation is part of the developer-experience baseline, while manual wrappers remain supported.
-5. SQL outbox dispatch is separate from message processing; supported scheduling models include manual drains, hosted-service drains, dedicated workers, and the active timer-triggered Functions backlog item.
+5. SQL outbox dispatch is separate from message processing; supported scheduling models include manual drains, hosted-service drains, dedicated workers, and timer-triggered Functions.
 6. MiniBus operational tooling should start from a shared tooling core, with CLI and UI as clients over the same read/action model.
 7. Aspire is a good fit for local sample orchestration, but it should not become a runtime dependency of MiniBus packages.
 
@@ -1584,7 +1581,7 @@ Open or deferred questions:
 Current active changes:
 
 ```text
-add-timer-triggered-sql-outbox-dispatch
+None.
 ```
 
 Completed but not yet archived changes:
