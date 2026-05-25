@@ -56,17 +56,18 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 
 ## Projects
 
-- `src/MiniBus.Core`: message contracts, handler APIs, context, serialization, routing, recoverability, saga abstractions, and persistence abstractions.
-- `src/MiniBus.AzureServiceBus`: Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
-- `src/MiniBus.AzureFunctions`: Azure Functions isolated worker processor and settlement integration.
-- `src/MiniBus.Persistence.Sql`: SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
-- `src/MiniBus.Persistence.AzureStorage`: Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
-- `src/MiniBus.Testing`: lightweight direct handler and saga handler unit-testing helpers.
-- `src/MiniBus.AzureFunctions.SourceGenerators`: optional source generators for thin Azure Functions Service Bus trigger wrappers.
-- `src/MiniBus.Analyzers`: optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
-- `src/MiniBus.Templates`: `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
-- `samples/MiniBus.Samples.Billing.FunctionApp`: emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, saga setup, and an opt-in SQL-backed reliability path.
-- `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
+- [`src/MiniBus.Core`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Core): message contracts, handler APIs, context, serialization, routing, recoverability, saga abstractions, and persistence abstractions.
+- [`src/MiniBus.AzureServiceBus`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureServiceBus): Azure Service Bus routing, envelope creation, header mapping, dispatch, scheduling, and delayed retry scheduling.
+- [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions): Azure Functions isolated worker processor and settlement integration.
+- [`src/MiniBus.Persistence.Sql`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.Sql): SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
+- [`src/MiniBus.Persistence.AzureStorage`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.AzureStorage): Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
+- [`src/MiniBus.Testing`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Testing): lightweight direct handler and saga handler unit-testing helpers.
+- [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators): optional source generators for thin Azure Functions Service Bus trigger wrappers.
+- [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers): optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
+- [`src/MiniBus.Templates`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Templates): `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
+- [`samples/MiniBus.Samples.Billing.FunctionApp`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Billing.FunctionApp): emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, saga setup, and an opt-in SQL-backed reliability path.
+- [`samples/MiniBus.Samples.Inventory.FunctionApp`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Inventory.FunctionApp): sibling Inventory endpoint for the emulator-backed Billing workflow.
+- [`tests/MiniBus.AcceptanceTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AcceptanceTests) and `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## Golden Path
 
@@ -85,6 +86,8 @@ dotnet new install artifacts/packages/MiniBus.Templates.0.1.0-preview.1.nupkg
 ```
 
 The template keeps Azure Service Bus credentials, queues, topics, subscriptions, deployment, and SQL reliability wiring application-owned. The manual setup path below remains useful when you want to assemble the registration yourself or study the underlying pieces.
+
+See [`src/MiniBus.Templates`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Templates) for template package details and generated-project scope.
 
 For an early Azure Functions + Azure Service Bus application, start with the package set that matches the runtime you want:
 
@@ -114,13 +117,13 @@ At the moment these packages are prepared for local pack verification; publishin
 9. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
 10. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
 
-Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers. `MiniBus.Analyzers` provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
+Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; see [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions) and [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators) for the wrapper shapes. [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers) provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
-The Billing sample keeps the first emulator loop lightweight, then shows the SQL-backed reliability increment separately: SQL schema application, opt-in SQL persistence registration for inbox/outbox/saga state, and application-owned outbox draining through `SqlMiniBusOutboxDispatcher`.
+The [`Billing sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Billing.FunctionApp) keeps the first emulator loop lightweight, then shows the SQL-backed reliability increment separately: SQL schema application, opt-in SQL persistence registration for inbox/outbox/saga state, and application-owned outbox draining through `SqlMiniBusOutboxDispatcher`. The [`Inventory sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Inventory.FunctionApp) is the sibling endpoint in the same local workflow.
 
 ## SQL Persistence
 
-`MiniBus.Persistence.Sql` provides the inbox/outbox contracts, SQL saga persistence, schema scripts, persistence session, outbox store, and dispatcher. The common SQL Server/Azure SQL setup path uses a connection string:
+[`MiniBus.Persistence.Sql`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.Sql) provides the inbox/outbox contracts, SQL saga persistence, schema scripts, persistence session, outbox store, and dispatcher. The common SQL Server/Azure SQL setup path uses a connection string:
 
 ```csharp
 services.AddMiniBusSqlPersistence(
@@ -173,7 +176,7 @@ Hosted dispatch wakes best-effort after successful MiniBus-owned SQL commits, po
 
 Advanced hosts can register a custom `ISqlMiniBusOutboxDispatchSignal` before enabling hosted dispatch when they need to coordinate the in-process wake-up path themselves.
 
-For Azure Functions, treat hosted dispatch, timer-triggered dispatch, and separate dispatcher apps as hosting choices over the same `SqlMiniBusOutboxDispatcher`. Same-process hosted dispatch gets the built-in best-effort wake-up; separate dispatcher apps discover work through timer or polling cadence. The package README has the detailed decision guide.
+For Azure Functions, treat hosted dispatch, timer-triggered dispatch, and separate dispatcher apps as hosting choices over the same `SqlMiniBusOutboxDispatcher`. Same-process hosted dispatch gets the built-in best-effort wake-up; separate dispatcher apps discover work through timer or polling cadence. The [`MiniBus.Persistence.Sql` README](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.Sql) has the detailed decision guide.
 
 Cleanup is explicit and retention-based:
 
@@ -209,7 +212,7 @@ dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.cs
 
 ## Azure Storage payload persistence and audit blobs
 
-Azure Storage persistence is opt-in through `MiniBus.Persistence.AzureStorage`. It provides Blob-backed payload storage for opaque payload bytes, claim-check/DataBus storage for large messages, and optional Blob-backed audit writing for processed inbound messages.
+Azure Storage persistence is opt-in through [`MiniBus.Persistence.AzureStorage`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.AzureStorage). It provides Blob-backed payload storage for opaque payload bytes, claim-check/DataBus storage for large messages, and optional Blob-backed audit writing for processed inbound messages.
 
 ```csharp
 services.AddMiniBusAzureStoragePersistence(
@@ -254,7 +257,7 @@ When the environment variable is set, the integration tests use that database an
 
 ### Reference Solution Acceptance Tests
 
-`MiniBus.AcceptanceTests` provides a small high-level canary layer above the unit, adapter, transport, SQL, and Azure Storage suites.
+[`MiniBus.AcceptanceTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AcceptanceTests) provides a small high-level canary layer above the unit, adapter, transport, SQL, and Azure Storage suites.
 
 Tier 1 acceptance tests are always-on and infrastructure-free. They build a real service provider from sample-style MiniBus registration, use recording transport and settlement doubles, and process a realistic billing workflow without Docker, live Azure Service Bus, or a real Azure Functions host.
 
