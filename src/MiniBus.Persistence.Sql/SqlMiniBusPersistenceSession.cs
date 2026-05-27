@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MiniBus.Core.Headers;
@@ -12,12 +13,14 @@ namespace MiniBus.Persistence.Sql;
 internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
 {
     private readonly DbConnection _connection;
-    private readonly DbTransaction? _transaction;
+    private readonly bool _usesExternalTransaction;
     private readonly bool _ownsConnection;
     private readonly SqlTableNames _tableNames;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
     private readonly ISqlMiniBusOutboxDispatchSignal _dispatchSignal;
     private readonly ILogger<SqlMiniBusPersistenceSession> _logger;
+    private DbTransaction? _activeTransaction;
+    private bool _inboxRecordInserted;
 
     public SqlMiniBusPersistenceSession(
         DbConnection connection,
@@ -34,12 +37,43 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         ArgumentNullException.ThrowIfNull(dispatchSignal);
 
         _connection = connection;
-        _transaction = transaction;
+        _activeTransaction = transaction;
+        _usesExternalTransaction = transaction is not null;
         _ownsConnection = ownsConnection;
         _tableNames = tableNames;
         _operationSerializer = operationSerializer;
         _dispatchSignal = dispatchSignal;
         _logger = logger ?? NullLogger<SqlMiniBusPersistenceSession>.Instance;
+    }
+
+    public async Task<bool> TryBeginAsync(
+        MiniBusInboxMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (_inboxRecordInserted)
+        {
+            return true;
+        }
+
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await InsertInboxRecordAsync(message, transaction, cancellationToken).ConfigureAwait(false);
+            _inboxRecordInserted = true;
+            return true;
+        }
+        catch (SqlException exception) when (IsDuplicateKey(exception))
+        {
+            if (!_usesExternalTransaction)
+            {
+                await RollbackOwnedTransactionAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return false;
+        }
     }
 
     public async Task<bool> IsProcessedAsync(
@@ -49,7 +83,7 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         ArgumentNullException.ThrowIfNull(message);
 
         await using var command = _connection.CreateCommand();
-        command.Transaction = _transaction;
+        command.Transaction = _activeTransaction;
         command.CommandText = $"""
             SELECT 1
             FROM {_tableNames.Inbox}
@@ -69,21 +103,23 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(outboxOperations);
 
-        if (_transaction is not null)
+        if (_usesExternalTransaction)
         {
             await CommitWithinExistingTransactionAsync(message, outboxOperations, cancellationToken)
                 .ConfigureAwait(false);
             return;
         }
 
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
         var committedMiniBusOwnedTransaction = false;
-        await using var transaction = await _connection
-            .BeginTransactionAsync(cancellationToken)
-            .ConfigureAwait(false);
 
         try
         {
-            await InsertInboxRecordAsync(message, transaction, cancellationToken).ConfigureAwait(false);
+            if (!_inboxRecordInserted)
+            {
+                await InsertInboxRecordAsync(message, transaction, cancellationToken).ConfigureAwait(false);
+                _inboxRecordInserted = true;
+            }
 
             var sequence = 0;
             foreach (var operation in outboxOperations)
@@ -98,9 +134,12 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            await RollbackOwnedTransactionAsync(cancellationToken).ConfigureAwait(false);
             throw;
         }
+
+        await DisposeOwnedTransactionAsync().ConfigureAwait(false);
+        _inboxRecordInserted = false;
 
         if (committedMiniBusOwnedTransaction && outboxOperations.Count > 0)
         {
@@ -110,6 +149,11 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
 
     public async ValueTask DisposeAsync()
     {
+        if (!_usesExternalTransaction && _activeTransaction is not null)
+        {
+            await RollbackOwnedTransactionAsync().ConfigureAwait(false);
+        }
+
         if (_ownsConnection)
         {
             await _connection.DisposeAsync().ConfigureAwait(false);
@@ -121,15 +165,62 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         IReadOnlyCollection<MiniBusOutboxOperation> outboxOperations,
         CancellationToken cancellationToken)
     {
-        await InsertInboxRecordAsync(message, _transaction!, cancellationToken).ConfigureAwait(false);
+        if (!_inboxRecordInserted)
+        {
+            await InsertInboxRecordAsync(message, _activeTransaction!, cancellationToken).ConfigureAwait(false);
+            _inboxRecordInserted = true;
+        }
 
         var sequence = 0;
         foreach (var operation in outboxOperations)
         {
-            await InsertOutboxOperationAsync(message, operation, sequence, _transaction!, cancellationToken)
+            await InsertOutboxOperationAsync(message, operation, sequence, _activeTransaction!, cancellationToken)
                 .ConfigureAwait(false);
             sequence++;
         }
+    }
+
+    private async Task<DbTransaction> EnsureTransactionAsync(CancellationToken cancellationToken)
+    {
+        if (_activeTransaction is not null)
+        {
+            return _activeTransaction;
+        }
+
+        _activeTransaction = await _connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return _activeTransaction;
+    }
+
+    private async Task RollbackOwnedTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_activeTransaction is null)
+        {
+            _inboxRecordInserted = false;
+            return;
+        }
+
+        try
+        {
+            await _activeTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _inboxRecordInserted = false;
+            await DisposeOwnedTransactionAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task DisposeOwnedTransactionAsync()
+    {
+        if (_activeTransaction is null)
+        {
+            return;
+        }
+
+        await _activeTransaction.DisposeAsync().ConfigureAwait(false);
+        _activeTransaction = null;
     }
 
     private void WakeDispatcherBestEffort()
@@ -201,9 +292,9 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         command.Transaction = transaction;
         command.CommandText = $"""
             INSERT INTO {_tableNames.Outbox}
-                (Id, OutgoingMessageId, EndpointName, IncomingMessageId, OperationKind, MessageType, Body, HeadersJson, DueTime, CreatedUtc)
+                (Id, OutgoingMessageId, EndpointName, IncomingMessageId, OperationKind, MessageType, Body, HeadersJson, CorrelationId, DueTime, CreatedUtc)
             VALUES
-                (@Id, @OutgoingMessageId, @EndpointName, @IncomingMessageId, @OperationKind, @MessageType, @Body, @HeadersJson, @DueTime, @CreatedUtc);
+                (@Id, @OutgoingMessageId, @EndpointName, @IncomingMessageId, @OperationKind, @MessageType, @Body, @HeadersJson, @CorrelationId, @DueTime, @CreatedUtc);
             """;
         AddParameter(command, "@Id", Guid.NewGuid());
         AddParameter(command, "@OutgoingMessageId", outgoingMessageId);
@@ -213,10 +304,21 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         AddParameter(command, "@MessageType", serialized.MessageType);
         AddParameter(command, "@Body", serialized.Body);
         AddParameter(command, "@HeadersJson", serialized.HeadersJson);
+        AddParameter(command, "@CorrelationId", ExtractCorrelationId(serialized.HeadersJson) is { } correlationId
+            ? correlationId
+            : DBNull.Value);
         AddParameter(command, "@DueTime", serialized.DueTime is null ? DBNull.Value : serialized.DueTime.Value);
         AddParameter(command, "@CreatedUtc", DateTimeOffset.UtcNow);
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? ExtractCorrelationId(string headersJson)
+    {
+        return SqlOutboxOperationSerializer.DeserializeHeaders(headersJson)
+            .TryGetValue(MiniBusHeaderNames.CorrelationId, out var correlationId)
+            ? correlationId
+            : null;
     }
 
     /// <summary>
@@ -251,5 +353,10 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         parameter.ParameterName = name;
         parameter.Value = value;
         command.Parameters.Add(parameter);
+    }
+
+    private static bool IsDuplicateKey(SqlException exception)
+    {
+        return exception.Number is 2601 or 2627;
     }
 }

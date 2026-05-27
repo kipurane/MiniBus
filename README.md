@@ -61,6 +61,9 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions): Azure Functions isolated worker processor and settlement integration.
 - [`src/MiniBus.Persistence.Sql`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.Sql): SQL Server/Azure SQL inbox/outbox/saga persistence with connection-string registration, schema script packaging, and a `DbConnection` factory escape hatch.
 - [`src/MiniBus.Persistence.AzureStorage`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Persistence.AzureStorage): Azure Blob Storage payload persistence, claim-check support, and audit blob writing.
+- [`src/MiniBus.Tooling.Core`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Core): provider-neutral operational tooling read models, filters, timeline fragments, and action contracts.
+- [`src/MiniBus.Tooling.Sql`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Sql): SQL-backed tooling readers for inbox, outbox, and saga state plus bounded outbox drain action integration.
+- [`src/MiniBus.Tooling.Cli`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Cli): first command-line surface for local MiniBus troubleshooting over the tooling core.
 - [`src/MiniBus.Testing`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Testing): lightweight direct handler and saga handler unit-testing helpers.
 - [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators): optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers): optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
@@ -269,6 +272,30 @@ Run the acceptance tests:
 dotnet test tests/MiniBus.AcceptanceTests/MiniBus.AcceptanceTests.csproj
 ```
 
+## Operational Tooling
+
+The first MiniBus tooling increment is local and SQL-first. `MiniBus.Tooling.Core` defines provider-neutral records and query/action contracts so the CLI and future UI/API surfaces can describe the same state. `MiniBus.Tooling.Sql` reads the existing SQL inbox, outbox, and saga tables without changing runtime behavior. `MiniBus.Tooling.Cli` is the first front door for troubleshooting.
+
+Read-only commands inspect SQL state and do not mutate MiniBus runtime data:
+
+```bash
+minibus --connection-string "$MINIBUS_SQL" inbox list --endpoint Billing
+minibus --connection-string "$MINIBUS_SQL" outbox list --status Pending --limit 20
+minibus --connection-string "$MINIBUS_SQL" sagas list --correlation-id correlation-1
+minibus --connection-string "$MINIBUS_SQL" show message --message-id message-1
+minibus --connection-string "$MINIBUS_SQL" show correlation --correlation-id correlation-1 --format json
+```
+
+The CLI defaults to compact table output and supports `--format json` for scripts and CI diagnostics. Common filters include `--endpoint`, `--message-id`, `--correlation-id`, `--status`, `--from`, `--to`, and `--limit`.
+
+The first explicit action is bounded SQL outbox draining. The action model and SQL implementation reuse `SqlMiniBusOutboxDispatcher`; dispatch still requires an application-configured transport dispatcher, routes, serializer, and message assemblies. The standalone CLI exposes the command shape but reports that drain is unsupported unless a host supplies those dispatch dependencies:
+
+```bash
+minibus --connection-string "$MINIBUS_SQL" outbox drain --max-batches 5
+```
+
+Tooling avoids dumping full message bodies, full saga data, or credentials by default. Blazor UI, Minimal API, Aspire orchestration, Azure Service Bus inspection, DLQ resubmission, message replay, arbitrary console log scraping, and Azure Monitor/Application Insights querying remain deferred work.
+
 ## Development Workflow
 
 MiniBus uses OpenSpec-driven development. Project context, feature backlog, active changes, archived changes, and capability specs live under `openspec/`.
@@ -285,4 +312,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, the emulator-runnable Billing sample with an opt-in SQL-backed reliability path, and reference acceptance coverage in place. The next production-readiness work is developer tooling and distribution polish: fuller samples, live Azure integration coverage, and publishing automation.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, reference acceptance coverage, and the first SQL/CLI operational tooling foundation in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling surfaces.

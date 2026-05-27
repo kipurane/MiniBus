@@ -28,6 +28,7 @@ BEGIN
         MessageType nvarchar(1024) NOT NULL,
         Body varbinary(max) NOT NULL,
         HeadersJson nvarchar(max) NOT NULL,
+        CorrelationId nvarchar(200) NULL,
         DueTime datetimeoffset NULL,
         CreatedUtc datetimeoffset NOT NULL,
         ClaimedUtc datetimeoffset NULL,
@@ -43,6 +44,9 @@ BEGIN
 
     CREATE INDEX IX_MiniBus_Outbox_IncomingMessage
         ON MiniBus.Outbox (EndpointName, IncomingMessageId);
+
+    CREATE INDEX IX_MiniBus_Outbox_CorrelationId
+        ON MiniBus.Outbox (CorrelationId, CreatedUtc);
 
     CREATE UNIQUE INDEX UX_MiniBus_Outbox_OutgoingMessageId
         ON MiniBus.Outbox (OutgoingMessageId);

@@ -1,3 +1,4 @@
+using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text;
 using Azure.Storage.Blobs;
@@ -331,7 +332,31 @@ public sealed class AzureStoragePayloadStoreIntegrationTests :
                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                        ".docker",
                        "run",
-                       "docker.sock"));
+                       "docker.sock"))
+                   || DefaultDockerNamedPipeIsReachable();
+        }
+
+        private static bool DefaultDockerNamedPipeIsReachable()
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+
+            try
+            {
+                using var pipe = new NamedPipeClientStream(
+                    ".",
+                    "docker_engine",
+                    PipeDirection.InOut,
+                    PipeOptions.Asynchronous);
+                pipe.Connect(250);
+                return pipe.IsConnected;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool UnixSocketIsReachable(string path)

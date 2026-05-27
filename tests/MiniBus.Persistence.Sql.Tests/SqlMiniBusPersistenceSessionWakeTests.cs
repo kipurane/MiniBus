@@ -136,6 +136,26 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
     }
 
     [Fact]
+    public async Task DisposeAsync_RollsBackPendingMiniBusOwnedTransactionStartedByTryBeginAsync()
+    {
+        var connection = new RecordingDbConnection();
+        var signal = new RecordingDispatchSignal();
+        var session = CreateSession(
+            connection,
+            transaction: null,
+            ownsConnection: true,
+            signal);
+
+        Assert.True(await session.TryBeginAsync(CreateInboxMessage()));
+
+        await session.DisposeAsync();
+
+        Assert.Equal(0, signal.WakeCount);
+        Assert.Equal(0, connection.LastTransaction?.CommitCount);
+        Assert.Equal(1, connection.LastTransaction?.RollbackCount);
+    }
+
+    [Fact]
     public async Task PublicFactoryConstructor_UsesProvidedDispatchSignal()
     {
         var connection = new RecordingDbConnection();

@@ -39,7 +39,7 @@ internal sealed class PersistenceBehavior : IMiniBusProcessingBehavior
         context.InboxMessage = CreateInboxMessage(context);
 
         if (context.Options.Persistence.EnableInbox
-            && await session.IsProcessedAsync(context.InboxMessage, cancellationToken).ConfigureAwait(false))
+            && !await session.TryBeginAsync(context.InboxMessage, cancellationToken).ConfigureAwait(false))
         {
             context.ShortCircuit();
             return;

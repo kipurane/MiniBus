@@ -2264,6 +2264,14 @@ public sealed class MiniBusProcessorTests
 
         public Action? OnCommit { get; set; }
 
+        public Task<bool> TryBeginAsync(
+            MiniBusInboxMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            CheckedMessage = message;
+            return Task.FromResult(!IsProcessed);
+        }
+
         public Task<bool> IsProcessedAsync(
             MiniBusInboxMessage message,
             CancellationToken cancellationToken = default)

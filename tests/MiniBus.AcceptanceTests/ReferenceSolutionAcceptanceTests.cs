@@ -717,7 +717,31 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                        ".docker",
                        "run",
-                       "docker.sock"));
+                       "docker.sock"))
+                   || DefaultDockerNamedPipeIsReachable();
+        }
+
+        private static bool DefaultDockerNamedPipeIsReachable()
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+
+            try
+            {
+                using var pipe = new System.IO.Pipes.NamedPipeClientStream(
+                    ".",
+                    "docker_engine",
+                    System.IO.Pipes.PipeDirection.InOut,
+                    System.IO.Pipes.PipeOptions.Asynchronous);
+                pipe.Connect(250);
+                return pipe.IsConnected;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool UnixSocketIsReachable(string path)

@@ -177,6 +177,12 @@ MiniBus.sln
   /MiniBus.Persistence.AzureStorage
     DependencyInjection
 
+  /MiniBus.Tooling.Core
+
+  /MiniBus.Tooling.Sql
+
+  /MiniBus.Tooling.Cli
+
   /MiniBus.Testing
 
   /MiniBus.Templates
@@ -195,6 +201,9 @@ MiniBus.sln
   /MiniBus.AzureFunctions.SourceGenerators.Tests
   /MiniBus.Persistence.AzureStorage.Tests
   /MiniBus.Persistence.Sql.Tests
+  /MiniBus.Tooling.Core.Tests
+  /MiniBus.Tooling.Sql.Tests
+  /MiniBus.Tooling.Cli.Tests
   /MiniBus.Templates.Tests
   /MiniBus.Testing.Tests
 
@@ -1244,9 +1253,17 @@ Implemented baseline:
 
 ### Phase 11 — Operational tooling
 
+Implemented baseline:
+
+- Provider-neutral tooling core for read models, filters, timeline fragments, reader interfaces, and explicit action contracts.
+- SQL tooling readers for inbox, outbox, and saga state.
+- Best-effort SQL message/correlation timeline assembly.
+- Bounded SQL outbox drain action wrapper over `SqlMiniBusOutboxDispatcher`.
+- First CLI command surface for local SQL troubleshooting with table and JSON output.
+- Documentation for local SQL configuration, read-only inspection, explicit actions, redaction defaults, and deferred tooling surfaces.
+
 Planned direction:
 
-- Add a shared MiniBus tooling substrate before building user-facing tools.
 - Build CLI and UI as two front doors over the same tooling core, not as separate implementations.
 - Use CLI commands for repeatable local troubleshooting, scripted operations, CI diagnostics, and safe administrative actions.
 - Use a local UI for correlated operational understanding: message timelines, inbox/outbox state, saga state, dispatch outcomes, logs, traces, metrics, and broker state.
@@ -1284,7 +1301,7 @@ Initial operational surfaces:
 - SQL saga records: saga type, correlation id, completion state, updated timestamp, version metadata, and serialized state inspection with appropriate redaction boundaries.
 - Azure Service Bus entities: configured queues, topics, subscriptions, active/dead-letter counts, and dead-letter peek where credentials allow it.
 - Observability: structured MiniBus logs, traces, metrics, and audit records when the application has configured a readable sink.
-- Safe actions: bounded outbox drain, failed outbox retry, broker/DLQ peek, and later carefully scoped DLQ resubmission if requirements justify it.
+- Safe actions: bounded outbox drain exists for SQL; failed outbox retry, broker/DLQ peek, and later carefully scoped DLQ resubmission remain future work if requirements justify them.
 
 The main value of the UI is correlation rather than replacing Azure Portal or Service Bus Explorer:
 
@@ -1387,17 +1404,17 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 
 The first tooling increment should harden a shared model before investing heavily in UI. CLI and UI should reuse the same core services so command output, API responses, and UI screens describe the same MiniBus state.
 
-- [ ] Create a tooling proposal that defines the shared tooling substrate, package/project boundaries, provider model, and first safe operations.
-- [ ] Add a provider-neutral tooling core for read models and action contracts over inbox, outbox, sagas, broker state, and observability sources.
-- [ ] Add SQL tooling readers for inbox, outbox, and saga state, including filtering by endpoint, message id, correlation id, status, and time window.
-- [ ] Add safe SQL outbox operations for bounded drain and retry-oriented troubleshooting over the existing `SqlMiniBusOutboxDispatcher`.
+- [x] Create a tooling proposal that defines the shared tooling substrate, package/project boundaries, provider model, and first safe operations.
+- [x] Add a provider-neutral tooling core for read models and action contracts over inbox, outbox, sagas, broker state, and observability sources.
+- [x] Add SQL tooling readers for inbox, outbox, and saga state, including filtering by endpoint, message id, correlation id, status, and time window.
+- [x] Add safe SQL outbox operations for bounded drain and retry-oriented troubleshooting over the existing `SqlMiniBusOutboxDispatcher`.
 - [ ] Add Azure Service Bus inspection for queues, topics, subscriptions, active/dead-letter counts, and dead-letter peek where credentials allow it.
 - [ ] Decide the first structured log source for local tooling, such as JSON log files, OpenTelemetry collector output, or a MiniBus-native audit/event store.
-- [ ] Add a CLI console app over the shared tooling core for local troubleshooting, scripts, and CI diagnostics.
+- [x] Add a CLI console app over the shared tooling core for local troubleshooting, scripts, and CI diagnostics.
 - [ ] Add a Minimal API over the shared tooling core so UI and future remote tooling use a stable HTTP boundary.
 - [ ] Add a Blazor Web App UI focused on correlated message timelines, inbox/outbox state, saga state, and dispatch/broker diagnostics.
 - [ ] Add Aspire-based local orchestration for the reference samples, SQL Server, Service Bus emulator, dispatcher host, tooling API, and tooling UI.
-- [ ] Document local-only versus Azure-hosted tooling deployment guidance, including credential handling, read/write action safety, and redaction expectations.
+- [x] Document local-only versus Azure-hosted tooling deployment guidance, including credential handling, read/write action safety, and redaction expectations.
 
 ---
 
@@ -1581,7 +1598,7 @@ Open or deferred questions:
 Current active changes:
 
 ```text
-None.
+add-operational-tooling-foundation
 ```
 
 Completed but not yet archived changes:

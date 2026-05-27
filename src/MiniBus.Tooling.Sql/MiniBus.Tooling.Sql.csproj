@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Tooling.Sql</PackageId>
+        <Title>MiniBus SQL Tooling</Title>
+        <Description>SQL Server and Azure SQL readers and safe actions for MiniBus operational tooling.</Description>
+        <PackageTags>minibus;tooling;sql-server;azure-sql;operations;outbox;inbox;sagas</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../MiniBus.Persistence.Sql/MiniBus.Persistence.Sql.csproj" />
+        <ProjectReference Include="../MiniBus.Tooling.Core/MiniBus.Tooling.Core.csproj" />
+    </ItemGroup>
+
+</Project>

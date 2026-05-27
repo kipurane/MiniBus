@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Tooling.Core</PackageId>
+        <Title>MiniBus Tooling Core</Title>
+        <Description>Provider-neutral MiniBus operational tooling contracts, read models, filters, and action models.</Description>
+        <PackageTags>minibus;tooling;operations;diagnostics;messaging</PackageTags>
+    </PropertyGroup>
+
+</Project>

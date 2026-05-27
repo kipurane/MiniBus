@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>minibus</ToolCommandName>
+        <PackageId>MiniBus.Tooling.Cli</PackageId>
+        <Title>MiniBus Tooling CLI</Title>
+        <Description>Command-line tooling for local MiniBus operational troubleshooting.</Description>
+        <PackageTags>minibus;tooling;cli;operations;diagnostics;messaging</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../MiniBus.Tooling.Core/MiniBus.Tooling.Core.csproj" />
+        <ProjectReference Include="../MiniBus.Tooling.Sql/MiniBus.Tooling.Sql.csproj" />
+    </ItemGroup>
+
+</Project>

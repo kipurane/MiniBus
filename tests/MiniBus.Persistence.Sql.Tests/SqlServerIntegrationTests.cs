@@ -1,6 +1,7 @@
 using Microsoft.Data.SqlClient;
 using System.Collections.Concurrent;
 using System.Data.Common;
+using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,44 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         await using var verificationSession = await database.CreateSessionAsync();
         Assert.True(await verificationSession.IsProcessedAsync(message));
+    }
+
+    [SqlServerFact]
+    public async Task TryBeginAsync_BlocksConcurrentDuplicateUntilCurrentAttemptReleasesTheInboxRow()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var message = database.CreateInboxMessage("message-concurrent-begin");
+        var firstSession = await database.CreateSessionAsync();
+        var secondSession = await database.CreateSessionAsync();
+
+        try
+        {
+            Assert.True(await firstSession.TryBeginAsync(message));
+
+            using var beginCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var secondBeginTask = secondSession.TryBeginAsync(message, beginCancellation.Token);
+            var prematureCompletion = await Task.WhenAny(
+                secondBeginTask,
+                Task.Delay(TimeSpan.FromMilliseconds(200), beginCancellation.Token));
+
+            Assert.NotSame(secondBeginTask, prematureCompletion);
+
+            await firstSession.DisposeAsync();
+            firstSession = NullPersistenceSession.Instance;
+
+            Assert.True(await secondBeginTask);
+
+            await secondSession.CommitAsync(message, Array.Empty<MiniBusOutboxOperation>(), beginCancellation.Token);
+            secondSession = NullPersistenceSession.Instance;
+
+            await using var verificationSession = await database.CreateSessionAsync();
+            Assert.False(await verificationSession.TryBeginAsync(message));
+        }
+        finally
+        {
+            await firstSession.DisposeAsync();
+            await secondSession.DisposeAsync();
+        }
     }
 
     [SqlServerFact]
@@ -511,7 +550,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT OperationKind, MessageType, HeadersJson, DueTime
+            SELECT OperationKind, MessageType, HeadersJson, DueTime, CorrelationId
             FROM {database.OutboxTableName};
             """;
 
@@ -522,6 +561,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Contains("correlation-1", reader.GetString(2), StringComparison.Ordinal);
         Assert.Contains("message-1", reader.GetString(2), StringComparison.Ordinal);
         Assert.Equal(dueTime, reader.GetFieldValue<DateTimeOffset>(3));
+        Assert.Equal("correlation-1", reader.GetString(4));
         Assert.False(await reader.ReadAsync());
     }
 
@@ -596,6 +636,34 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             throw new InvalidOperationException(
                 $"Timed out waiting for {description}.",
                 exception);
+        }
+    }
+
+    private sealed class NullPersistenceSession : IMiniBusPersistenceSession
+    {
+        public static NullPersistenceSession Instance { get; } = new();
+
+        public Task<bool> TryBeginAsync(MiniBusInboxMessage message, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> IsProcessedAsync(MiniBusInboxMessage message, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task CommitAsync(
+            MiniBusInboxMessage message,
+            IReadOnlyCollection<MiniBusOutboxOperation> outboxOperations,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
         }
     }
 
@@ -1105,7 +1173,31 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                        ".docker",
                        "run",
-                       "docker.sock"));
+                       "docker.sock"))
+                   || DefaultDockerNamedPipeIsReachable();
+        }
+
+        private static bool DefaultDockerNamedPipeIsReachable()
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+
+            try
+            {
+                using var pipe = new NamedPipeClientStream(
+                    ".",
+                    "docker_engine",
+                    PipeDirection.InOut,
+                    PipeOptions.Asynchronous);
+                pipe.Connect(250);
+                return pipe.IsConnected;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool UnixSocketIsReachable(string path)
