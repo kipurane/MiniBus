@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiniBus — Architect & Developer Introduction</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #111832;
+      --panel-2: #151f3d;
+      --text: #e8edf7;
+      --muted: #aeb9cf;
+      --line: #2a355b;
+      --accent: #7dd3fc;
+      --accent-2: #a7f3d0;
+      --warn: #fde68a;
+      --bad: #fca5a5;
+      --good: #86efac;
+      --code: #07101f;
+      --shadow: rgba(0,0,0,.35);
+      --radius: 18px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at 15% 0%, rgba(125, 211, 252, .18), transparent 28rem),
+        radial-gradient(circle at 80% 10%, rgba(167, 243, 208, .12), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .shell {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 36px 0 64px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 26px;
+      align-items: stretch;
+      margin-bottom: 28px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.025));
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius);
+      box-shadow: 0 20px 50px var(--shadow);
+    }
+
+    .hero-main {
+      padding: 38px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-main:after {
+      content: "";
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      border-radius: 999px;
+      right: -130px;
+      top: -130px;
+      background: radial-gradient(circle, rgba(125,211,252,.22), transparent 65%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      font-size: .82rem;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+      color: var(--accent-2);
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: clamp(2.6rem, 6vw, 5rem);
+      line-height: .95;
+      margin: 0 0 18px;
+      letter-spacing: -.055em;
+    }
+
+    .lead {
+      font-size: 1.2rem;
+      color: var(--muted);
+      max-width: 760px;
+      margin: 0 0 24px;
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(125,211,252,.28);
+      background: rgba(125,211,252,.08);
+      color: #dff7ff;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: .9rem;
+      white-space: nowrap;
+    }
+
+    .hero-side {
+      padding: 24px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .stat {
+      padding: 18px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .stat strong { display: block; font-size: 1.45rem; margin-bottom: 2px; }
+    .stat span { color: var(--muted); font-size: .92rem; }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .toc a {
+      display: block;
+      text-align: center;
+      padding: 12px 10px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.055);
+      border: 1px solid rgba(255,255,255,.08);
+      color: var(--text);
+      font-weight: 650;
+      font-size: .92rem;
+    }
+
+    section { margin: 28px 0; }
+    .section-card { padding: 28px; }
+
+    h2 {
+      font-size: clamp(1.6rem, 3vw, 2.3rem);
+      letter-spacing: -.035em;
+      margin: 0 0 14px;
+    }
+
+    h3 {
+      font-size: 1.18rem;
+      margin: 22px 0 8px;
+      letter-spacing: -.015em;
+    }
+
+    p { color: var(--muted); margin: 0 0 14px; }
+    .tight p { margin-bottom: 8px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+
+    .mini-card {
+      padding: 18px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+
+    .mini-card h3 { margin-top: 0; }
+    .mini-card p:last-child { margin-bottom: 0; }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(125,211,252,.08);
+      padding: 16px 18px;
+      border-radius: 12px;
+      margin: 16px 0;
+    }
+
+    .callout strong { color: var(--text); }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 18px;
+      overflow: auto;
+      background: var(--code);
+      border: 1px solid rgba(125,211,252,.14);
+      border-radius: 16px;
+      color: #d8e9ff;
+      font-family: var(--mono);
+      font-size: .88rem;
+      line-height: 1.5;
+      tab-size: 2;
+    }
+
+    code {
+      font-family: var(--mono);
+      color: #dff7ff;
+      background: rgba(125,211,252,.09);
+      border: 1px solid rgba(125,211,252,.12);
+      border-radius: 6px;
+      padding: 1px 5px;
+    }
+
+    pre code {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    .flow {
+      width: 100%;
+      min-height: 360px;
+      margin-top: 18px;
+      border-radius: 16px;
+      background: rgba(0,0,0,.16);
+      border: 1px solid rgba(255,255,255,.08);
+      overflow: hidden;
+    }
+
+    svg text {
+      font-family: var(--sans);
+      fill: #e8edf7;
+    }
+
+    .bar {
+      display: grid;
+      grid-template-columns: 190px 1fr 72px;
+      gap: 12px;
+      align-items: center;
+      margin: 10px 0;
+      font-size: .92rem;
+    }
+    .bar-name { color: var(--text); font-weight: 650; }
+    .bar-track {
+      height: 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    .bar-value { color: var(--muted); text-align: right; font-family: var(--mono); }
+
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .step {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 14px;
+      align-items: start;
+      padding: 15px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .step:before {
+      content: counter(step);
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: rgba(125,211,252,.14);
+      border: 1px solid rgba(125,211,252,.25);
+      color: var(--accent);
+      font-weight: 800;
+    }
+    .step strong { display: block; color: var(--text); margin-bottom: 3px; }
+    .step span { color: var(--muted); }
+
+    .matrix {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .matrix-row {
+      display: grid;
+      grid-template-columns: 210px 1fr;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.075);
+    }
+    .matrix-row strong { color: var(--text); }
+    .matrix-row span { color: var(--muted); }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 750;
+      letter-spacing: .02em;
+      background: rgba(167,243,208,.12);
+      color: #d9ffe9;
+      border: 1px solid rgba(167,243,208,.25);
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: .9rem;
+      padding: 24px 0 0;
+    }
+
+    @media (max-width: 960px) {
+      .hero, .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+      .toc { grid-template-columns: repeat(2, 1fr); }
+      .bar { grid-template-columns: 1fr; gap: 6px; }
+      .bar-value { text-align: left; }
+      .matrix-row { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      .card, .mini-card, .toc a, .step, .matrix-row { box-shadow: none; border-color: #ddd; background: #fff; }
+      p, .muted, .stat span, .step span, .matrix-row span { color: #333; }
+      h1, h2, h3, .stat strong { color: #111; }
+      pre { background: #f7f7f7; color: #111; border-color: #ddd; white-space: pre-wrap; }
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="hero-main card">
+        <div class="eyebrow">MiniBus architecture primer</div>
+        <h1>Azure-native messaging without handler pollution.</h1>
+        <p class="lead">
+          MiniBus is a compact .NET message-processing framework for Azure Functions and Azure Service Bus.
+          It keeps Azure Functions triggers and Azure SDK types at the edge, while business code works with
+          message contracts, handlers, sagas, and <code>MiniBusContext</code>.
+        </p>
+        <div class="chips">
+          <span class="chip">.NET / C#</span>
+          <span class="chip">Azure Functions isolated worker</span>
+          <span class="chip">Azure Service Bus</span>
+          <span class="chip">Handlers + sagas</span>
+          <span class="chip">SQL inbox/outbox</span>
+          <span class="chip">Blob claim-check/audit</span>
+        </div>
+      </div>
+
+      <aside class="hero-side card">
+        <div class="stat">
+          <strong>Thin adapter</strong>
+          <span>Function triggers delegate to <code>MiniBusProcessor</code>; handlers stay transport-neutral.</span>
+        </div>
+        <div class="stat">
+          <strong>Explicit core</strong>
+          <span>Contracts, routing, persistence and recoverability are configured in application startup.</span>
+        </div>
+        <div class="stat">
+          <strong>Reliability path</strong>
+          <span>Inbox, outbox and saga state can be persisted to SQL; large payloads can use Blob claim-check.</span>
+        </div>
+      </aside>
+    </header>
+
+    <nav class="toc" aria-label="Page sections">
+      <a href="#mental-model">Mental model</a>
+      <a href="#processing">Processing</a>
+      <a href="#projects">Projects</a>
+      <a href="#handlers">Handlers</a>
+      <a href="#sagas">Sagas</a>
+      <a href="#start">Start dev</a>
+    </nav>
+
+    <section id="mental-model" class="section-card card">
+      <h2>1. Mental model</h2>
+      <p>
+        Treat MiniBus as a small application-level bus runtime. Azure Functions and Azure Service Bus provide hosting and transport.
+        MiniBus provides the contract model, processing pipeline, handler invocation, saga invocation, routing, recoverability hooks,
+        and optional persistence.
+      </p>
+
+      <div class="grid-3">
+        <div class="mini-card">
+          <span class="badge">Edge</span>
+          <h3>Azure Function wrapper</h3>
+          <p>Contains the actual <code>[ServiceBusTrigger]</code> declaration and forwards the received message plus settlement actions to MiniBus.</p>
+        </div>
+        <div class="mini-card">
+          <span class="badge">Runtime</span>
+          <h3>MiniBusProcessor</h3>
+          <p>Maps headers, resolves message type, deserializes, invokes handlers and sagas, commits persistence state, dispatches outgoing operations, then settles.</p>
+        </div>
+        <div class="mini-card">
+          <span class="badge">Application</span>
+          <h3>Handlers and sagas</h3>
+          <p>Implement business behavior through <code>IHandleMessages&lt;T&gt;</code> and <code>IHandleSagaMessages&lt;T&gt;</code>. They use <code>MiniBusContext</code> for outgoing messages.</p>
+        </div>
+      </div>
+
+      <div class="flow" role="img" aria-label="MiniBus processing pipeline diagram">
+        <svg viewBox="0 0 1160 360" width="100%" height="100%">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#7dd3fc"></path>
+            </marker>
+            <linearGradient id="box" x1="0" x2="1">
+              <stop offset="0" stop-color="#16244b"></stop>
+              <stop offset="1" stop-color="#102038"></stop>
+            </linearGradient>
+          </defs>
+
+          <rect x="25" y="70" width="170" height="78" rx="14" fill="url(#box)" stroke="#37518b"/>
+          <text x="110" y="102" text-anchor="middle" font-weight="700" font-size="16">Azure Function</text>
+          <text x="110" y="126" text-anchor="middle" fill="#aeb9cf" font-size="13">ServiceBusTrigger</text>
+
+          <rect x="245" y="70" width="185" height="78" rx="14" fill="url(#box)" stroke="#37518b"/>
+          <text x="337" y="102" text-anchor="middle" font-weight="700" font-size="16">Functions adapter</text>
+          <text x="337" y="126" text-anchor="middle" fill="#aeb9cf" font-size="13">ProcessAsync(...)</text>
+
+          <rect x="480" y="70" width="185" height="78" rx="14" fill="url(#box)" stroke="#37518b"/>
+          <text x="572" y="102" text-anchor="middle" font-weight="700" font-size="16">MiniBusProcessor</text>
+          <text x="572" y="126" text-anchor="middle" fill="#aeb9cf" font-size="13">ordered behaviors</text>
+
+          <rect x="715" y="30" width="185" height="70" rx="14" fill="#132641" stroke="#2f4b7a"/>
+          <text x="807" y="61" text-anchor="middle" font-weight="700" font-size="15">Deserialize</text>
+          <text x="807" y="82" text-anchor="middle" fill="#aeb9cf" font-size="12">headers + body</text>
+
+          <rect x="715" y="130" width="185" height="70" rx="14" fill="#132641" stroke="#2f4b7a"/>
+          <text x="807" y="161" text-anchor="middle" font-weight="700" font-size="15">Invoke</text>
+          <text x="807" y="182" text-anchor="middle" fill="#aeb9cf" font-size="12">handlers + sagas</text>
+
+          <rect x="950" y="30" width="185" height="70" rx="14" fill="#132641" stroke="#2f4b7a"/>
+          <text x="1042" y="61" text-anchor="middle" font-weight="700" font-size="15">Persistence</text>
+          <text x="1042" y="82" text-anchor="middle" fill="#aeb9cf" font-size="12">inbox/outbox/saga</text>
+
+          <rect x="950" y="130" width="185" height="70" rx="14" fill="#132641" stroke="#2f4b7a"/>
+          <text x="1042" y="161" text-anchor="middle" font-weight="700" font-size="15">Dispatch</text>
+          <text x="1042" y="182" text-anchor="middle" fill="#aeb9cf" font-size="12">send/publish/schedule</text>
+
+          <rect x="480" y="245" width="420" height="72" rx="14" fill="#15213a" stroke="#405481"/>
+          <text x="690" y="276" text-anchor="middle" font-weight="700" font-size="16">Recoverability + settlement</text>
+          <text x="690" y="300" text-anchor="middle" fill="#aeb9cf" font-size="13">complete, immediate retry, delayed retry, dead-letter, or propagate</text>
+
+          <line x1="195" y1="109" x2="245" y2="109" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <line x1="430" y1="109" x2="480" y2="109" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <line x1="665" y1="109" x2="715" y2="65" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <line x1="665" y1="109" x2="715" y2="165" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <line x1="900" y1="65" x2="950" y2="65" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <line x1="900" y1="165" x2="950" y2="165" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <path d="M1042 200 C1042 250, 900 280, 900 280" fill="none" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+          <path d="M572 148 C572 210, 572 230, 600 245" fill="none" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow)"/>
+        </svg>
+      </div>
+
+      <div class="callout">
+        <strong>Design rule:</strong> application handlers should not depend on <code>ServiceBusReceivedMessage</code>,
+        <code>ServiceBusMessageActions</code>, Azure Functions binding attributes, or Azure SDK transport details.
+      </div>
+    </section>
+
+    <section id="processing" class="section-card card">
+      <h2>2. What happens under the hood</h2>
+      <div class="grid-2">
+        <div>
+          <div class="steps">
+            <div class="step"><div><strong>Receive</strong><span>Azure Functions receives a Service Bus message and calls the wrapper.</span></div></div>
+            <div class="step"><div><strong>Adapt</strong><span>The adapter maps the Azure message into MiniBus processing inputs.</span></div></div>
+            <div class="step"><div><strong>Resolve + deserialize</strong><span>Headers identify the message type and payload is deserialized through the configured serializer.</span></div></div>
+            <div class="step"><div><strong>Check inbox</strong><span>When SQL persistence is enabled, duplicate messages can be skipped before handlers run.</span></div></div>
+            <div class="step"><div><strong>Invoke handlers and sagas</strong><span>Handlers and sagas can publish, send, schedule and request saga timeouts through <code>MiniBusContext</code>.</span></div></div>
+            <div class="step"><div><strong>Commit + dispatch + settle</strong><span>MiniBus commits persistence state, captures or dispatches outgoing work, then completes, retries, schedules retry, dead-letters, or propagates failure.</span></div></div>
+          </div>
+        </div>
+        <div>
+          <h3>Processing outcomes to watch</h3>
+          <p>
+            MiniBus emits structured logs, ActivitySource traces and Metrics instruments. These are deliberately provider-neutral:
+            the host decides whether the data flows to Application Insights, OpenTelemetry, local console logs, or other sinks.
+          </p>
+
+          <div class="matrix">
+            <div class="matrix-row"><strong>Log scope</strong><span>Endpoint, message type, message id, correlation, causation, retry attempt, handler/saga type, outcome, outbox count.</span></div>
+            <div class="matrix-row"><strong>Trace source</strong><span><code>MiniBus.Processing</code> with root activity <code>MiniBus.Process</code>.</span></div>
+            <div class="matrix-row"><strong>Metrics</strong><span>Processing attempts, duration, retries, dead letters, duplicates, failures, handler duration, saga duration and completions.</span></div>
+            <div class="matrix-row"><strong>SQL outbox metrics</strong><span>Dispatch batches, batch duration, operations and operation duration.</span></div>
+          </div>
+
+          <h3>Reliability posture</h3>
+          <div class="bar"><span class="bar-name">Handler simplicity</span><span class="bar-track"><span class="bar-fill" style="width: 92%"></span></span><span class="bar-value">high</span></div>
+          <div class="bar"><span class="bar-name">Runtime explicitness</span><span class="bar-track"><span class="bar-fill" style="width: 88%"></span></span><span class="bar-value">high</span></div>
+          <div class="bar"><span class="bar-name">Managed abstraction</span><span class="bar-track"><span class="bar-fill" style="width: 62%"></span></span><span class="bar-value">medium</span></div>
+          <div class="bar"><span class="bar-name">Operational control</span><span class="bar-track"><span class="bar-fill" style="width: 90%"></span></span><span class="bar-value">high</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="projects" class="section-card card">
+      <h2>3. Project/package map</h2>
+      <p>
+        The solution is divided into small packages. Architecturally, this makes the application decide how much runtime surface it wants:
+        only core contracts, Functions hosting, Service Bus transport, SQL reliability, Azure Storage payload/audit support, tooling, analyzers, templates, or testing helpers.
+      </p>
+
+      <div class="grid-4">
+        <div class="mini-card"><h3>MiniBus.Core</h3><p>Contracts, handlers, context, serialization, recoverability, saga abstractions and persistence abstractions.</p></div>
+        <div class="mini-card"><h3>MiniBus.AzureFunctions</h3><p>Isolated worker adapter and <code>MiniBusProcessor</code> integration for Service Bus triggers.</p></div>
+        <div class="mini-card"><h3>MiniBus.AzureServiceBus</h3><p>Routes, message factory, transport dispatch, scheduling, header mapping and delayed retry scheduling.</p></div>
+        <div class="mini-card"><h3>MiniBus.Persistence.Sql</h3><p>SQL inbox, outbox, saga persistence, schema scripts, transaction escape hatches and dispatcher.</p></div>
+        <div class="mini-card"><h3>MiniBus.Persistence.AzureStorage</h3><p>Blob-backed payload storage, claim-check/DataBus behavior and audit blobs.</p></div>
+        <div class="mini-card"><h3>MiniBus.Testing</h3><p>Direct handler and saga handler unit-test helpers.</p></div>
+        <div class="mini-card"><h3>SourceGenerators + Analyzers</h3><p>Optional generated Azure Function wrappers and compile-time guidance for common mistakes.</p></div>
+        <div class="mini-card"><h3>Templates + Tooling</h3><p><code>dotnet new</code> starters and SQL-first local troubleshooting commands.</p></div>
+      </div>
+
+      <div class="flow" role="img" aria-label="Package dependency graph">
+        <svg viewBox="0 0 1160 390" width="100%" height="100%">
+          <defs>
+            <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#a7f3d0"></path>
+            </marker>
+          </defs>
+
+          <rect x="470" y="35" width="220" height="72" rx="14" fill="#152f42" stroke="#4b7595"/>
+          <text x="580" y="67" text-anchor="middle" font-weight="800">MiniBus.Core</text>
+          <text x="580" y="89" text-anchor="middle" fill="#aeb9cf" font-size="12">contracts + abstractions</text>
+
+          <rect x="130" y="155" width="215" height="72" rx="14" fill="#142642" stroke="#415d91"/>
+          <text x="237" y="187" text-anchor="middle" font-weight="800">AzureFunctions</text>
+          <text x="237" y="209" text-anchor="middle" fill="#aeb9cf" font-size="12">processor adapter</text>
+
+          <rect x="370" y="155" width="215" height="72" rx="14" fill="#142642" stroke="#415d91"/>
+          <text x="477" y="187" text-anchor="middle" font-weight="800">AzureServiceBus</text>
+          <text x="477" y="209" text-anchor="middle" fill="#aeb9cf" font-size="12">transport</text>
+
+          <rect x="610" y="155" width="215" height="72" rx="14" fill="#142642" stroke="#415d91"/>
+          <text x="717" y="187" text-anchor="middle" font-weight="800">Persistence.Sql</text>
+          <text x="717" y="209" text-anchor="middle" fill="#aeb9cf" font-size="12">inbox/outbox/sagas</text>
+
+          <rect x="850" y="155" width="215" height="72" rx="14" fill="#142642" stroke="#415d91"/>
+          <text x="957" y="187" text-anchor="middle" font-weight="800">AzureStorage</text>
+          <text x="957" y="209" text-anchor="middle" fill="#aeb9cf" font-size="12">claim-check + audit</text>
+
+          <rect x="250" y="285" width="190" height="58" rx="14" fill="#17243b" stroke="#3a4f7a"/>
+          <text x="345" y="320" text-anchor="middle" font-weight="800">Testing</text>
+
+          <rect x="485" y="285" width="190" height="58" rx="14" fill="#17243b" stroke="#3a4f7a"/>
+          <text x="580" y="320" text-anchor="middle" font-weight="800">Analyzers</text>
+
+          <rect x="720" y="285" width="190" height="58" rx="14" fill="#17243b" stroke="#3a4f7a"/>
+          <text x="815" y="320" text-anchor="middle" font-weight="800">Templates / CLI</text>
+
+          <line x1="237" y1="155" x2="505" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="477" y1="155" x2="550" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="717" y1="155" x2="610" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="957" y1="155" x2="655" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="345" y1="285" x2="520" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="580" y1="285" x2="580" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+          <line x1="815" y1="285" x2="640" y2="107" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow2)"/>
+        </svg>
+      </div>
+    </section>
+
+    <section id="handlers" class="section-card card">
+      <h2>4. Developing handlers</h2>
+      <p>
+        A handler is deliberately small: it receives a deserialized contract, <code>MiniBusContext</code>, and a cancellation token.
+        The context exposes outgoing message operations, so the handler does not need Service Bus sender clients or Function trigger artifacts.
+      </p>
+
+      <div class="grid-2">
+        <div>
+          <h3>Handler shape</h3>
+          <pre><code>public sealed record CreateInvoice(
+    string InvoiceId,
+    string CustomerId,
+    decimal Amount) : ICommand;
+
+public sealed class CreateInvoiceHandler
+    : IHandleMessages&lt;CreateInvoice&gt;
+{
+    public async Task Handle(
+        CreateInvoice message,
+        MiniBusContext context,
+        CancellationToken cancellationToken)
+    {
+        await context.Publish(
+            new InvoiceCreated(
+                message.InvoiceId,
+                message.CustomerId,
+                message.Amount),
+            cancellationToken);
+
+        await context.Send(
+            new ReserveInventory(
+                message.InvoiceId,
+                message.CustomerId,
+                "sample-sku",
+                1),
+            cancellationToken);
+    }
+}</code></pre>
+        </div>
+
+        <div class="tight">
+          <h3>Handler rules</h3>
+          <div class="matrix">
+            <div class="matrix-row"><strong>Use contracts</strong><span>Define messages as <code>ICommand</code>, <code>IEvent</code>, or <code>IMessage</code>.</span></div>
+            <div class="matrix-row"><strong>Use DI</strong><span>Register handlers explicitly, or use the discovery/registration style the application adopts.</span></div>
+            <div class="matrix-row"><strong>Use MiniBusContext</strong><span>Call <code>Send</code>, <code>Publish</code>, and <code>Schedule</code> from context instead of constructing broker messages.</span></div>
+            <div class="matrix-row"><strong>Keep idempotency</strong><span>Outbox dispatch is at-least-once. Downstream handlers should tolerate duplicates; SQL inbox helps with receive-side deduplication.</span></div>
+            <div class="matrix-row"><strong>Test directly</strong><span>Unit test handler logic without Azure Functions host, Service Bus emulator, or Azure SDK objects unless infrastructure behavior is under test.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sagas" class="section-card card">
+      <h2>5. Developing sagas</h2>
+      <p>
+        Sagas model long-running workflows. MiniBus saga support is explicit: define saga data, inherit from
+        <code>MiniBusSaga&lt;TData&gt;</code>, implement <code>IHandleSagaMessages&lt;TMessage&gt;</code>, configure correlation rules, and register saga mappings at startup.
+      </p>
+
+      <div class="grid-2">
+        <div>
+          <h3>Saga shape</h3>
+          <pre><code>public sealed class BillingSagaData : ISagaData
+{
+    public Guid Id { get; set; }
+    public string CorrelationId { get; set; } = "";
+    public bool IsCompleted { get; set; }
+    public bool InvoiceCreated { get; set; }
+    public bool PaymentTimedOut { get; set; }
+}
+
+public sealed class BillingSaga :
+    MiniBusSaga&lt;BillingSagaData&gt;,
+    IHandleSagaMessages&lt;InvoiceCreated&gt;,
+    IHandleSagaMessages&lt;InvoicePaymentTimeout&gt;
+{
+    public override void ConfigureHowToFindSaga(
+        SagaMapper&lt;BillingSagaData&gt; mapper)
+    {
+        mapper.StartsWith&lt;InvoiceCreated&gt;(m =&gt; m.InvoiceId)
+              .Correlate&lt;InvoicePaymentTimeout&gt;(m =&gt; m.InvoiceId);
+    }
+
+    public async Task Handle(
+        InvoiceCreated message,
+        MiniBusContext context,
+        CancellationToken cancellationToken)
+    {
+        Data.InvoiceCreated = true;
+
+        await RequestTimeout(
+            new InvoicePaymentTimeout(message.InvoiceId),
+            TimeSpan.FromDays(7),
+            context,
+            cancellationToken);
+    }
+
+    public Task Handle(
+        InvoicePaymentTimeout message,
+        MiniBusContext context,
+        CancellationToken cancellationToken)
+    {
+        Data.PaymentTimedOut = true;
+        MarkAsComplete();
+        return Task.CompletedTask;
+    }
+}</code></pre>
+        </div>
+
+        <div>
+          <h3>Saga lifecycle</h3>
+          <div class="flow" style="min-height: 320px" role="img" aria-label="Saga lifecycle diagram">
+            <svg viewBox="0 0 540 320" width="100%" height="100%">
+              <defs>
+                <marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                  <path d="M0,0 L0,6 L9,3 z" fill="#7dd3fc"></path>
+                </marker>
+              </defs>
+              <rect x="40" y="35" width="170" height="58" rx="13" fill="#142642" stroke="#415d91"/>
+              <text x="125" y="70" text-anchor="middle" font-weight="800">Start message</text>
+
+              <rect x="330" y="35" width="170" height="58" rx="13" fill="#142642" stroke="#415d91"/>
+              <text x="415" y="70" text-anchor="middle" font-weight="800">Create saga data</text>
+
+              <rect x="330" y="130" width="170" height="58" rx="13" fill="#142642" stroke="#415d91"/>
+              <text x="415" y="165" text-anchor="middle" font-weight="800">Request timeout</text>
+
+              <rect x="40" y="130" width="170" height="58" rx="13" fill="#142642" stroke="#415d91"/>
+              <text x="125" y="165" text-anchor="middle" font-weight="800">Correlate next msg</text>
+
+              <rect x="185" y="230" width="170" height="58" rx="13" fill="#142642" stroke="#415d91"/>
+              <text x="270" y="265" text-anchor="middle" font-weight="800">Mark complete</text>
+
+              <line x1="210" y1="64" x2="330" y2="64" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow3)"/>
+              <line x1="415" y1="93" x2="415" y2="130" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow3)"/>
+              <line x1="330" y1="159" x2="210" y2="159" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow3)"/>
+              <line x1="125" y1="188" x2="250" y2="230" stroke="#7dd3fc" stroke-width="2" marker-end="url(#arrow3)"/>
+            </svg>
+          </div>
+
+          <h3>Registration</h3>
+          <pre><code>services.AddMiniBusAzureFunctions(options =&gt;
+{
+    options.EndpointName = "Billing";
+    options.EnableSagas = true;
+});
+
+var sagaRegistry = new SagaRegistry();
+sagaRegistry.Register&lt;BillingSaga, BillingSagaData&gt;();
+
+services.AddSingleton(sagaRegistry);
+services.AddSingleton&lt;SagaInvoker&gt;();
+
+// samples/tests:
+services.AddSingleton&lt;ISagaPersistence, InMemorySagaPersistence&gt;();
+
+// production reliability path:
+services.AddMiniBusSqlPersistence(connectionString);</code></pre>
+
+          <div class="callout">
+            <strong>Production note:</strong> in-memory saga persistence is for samples and tests. SQL persistence provides production saga persistence with optimistic concurrency.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="start" class="section-card card">
+      <h2>6. Starting development</h2>
+      <div class="grid-2">
+        <div>
+          <h3>Fastest path: template</h3>
+          <pre><code>dotnet new install MiniBus.Templates
+dotnet new minibus-functionapp -n Contoso.Orders.FunctionApp</code></pre>
+
+          <h3>Manual package set</h3>
+          <pre><code>dotnet add package MiniBus.Core
+dotnet add package MiniBus.AzureServiceBus
+dotnet add package MiniBus.AzureFunctions
+dotnet add package MiniBus.Persistence.Sql
+dotnet add package MiniBus.Persistence.AzureStorage
+dotnet add package MiniBus.Testing
+
+# optional
+dotnet add package MiniBus.AzureFunctions.SourceGenerators
+dotnet add package MiniBus.Analyzers</code></pre>
+
+          <h3>Local repository workflow</h3>
+          <pre><code>dotnet test --no-restore
+dotnet pack MiniBus.sln -c Release
+./eng/verify-templates.sh
+openspec status
+openspec list</code></pre>
+        </div>
+
+        <div>
+          <h3>Startup checklist</h3>
+          <div class="steps">
+            <div class="step"><div><strong>Define contracts</strong><span>Use <code>ICommand</code>, <code>IEvent</code>, or <code>IMessage</code>.</span></div></div>
+            <div class="step"><div><strong>Implement handlers</strong><span>Use <code>IHandleMessages&lt;T&gt;</code> and depend on <code>MiniBusContext</code>.</span></div></div>
+            <div class="step"><div><strong>Register endpoint</strong><span>Call <code>AddMiniBusAzureFunctions</code> with endpoint name, recoverability and saga options.</span></div></div>
+            <div class="step"><div><strong>Configure routes</strong><span>Map commands, events and scheduled messages to queues, topics or timeout queues.</span></div></div>
+            <div class="step"><div><strong>Add wrappers</strong><span>Use manual Functions wrappers or source-generated wrappers.</span></div></div>
+            <div class="step"><div><strong>Add reliability</strong><span>Apply SQL schema scripts, enable SQL persistence, then run outbox dispatch from a timer, worker, hosted dispatcher, or separate dispatcher app.</span></div></div>
+            <div class="step"><div><strong>Add payload/audit support</strong><span>Enable Azure Storage claim-check and/or audit blobs only when required.</span></div></div>
+            <div class="step"><div><strong>Test at the right layer</strong><span>Start with direct handler/saga tests, then add processor, SQL, storage and acceptance tests where needed.</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-card card">
+      <h2>7. Reference startup composition</h2>
+      <p>
+        A typical Azure Functions endpoint composes the adapter, serializer, handlers, routes, transport dispatcher, Service Bus client,
+        delayed retry scheduler, saga registry and optional SQL persistence.
+      </p>
+
+      <pre><code>services.AddMiniBusAzureFunctions(options =&gt;
+{
+    options.EndpointName = "Billing";
+    options.EnableSagas = true;
+    options.Recoverability.ImmediateRetries = 3;
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(1));
+    options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(5));
+    options.Recoverability.DeadLetterAfterRetriesExhausted = true;
+});
+
+services.AddSingleton&lt;IMessageSerializer, SystemTextJsonMessageSerializer&gt;();
+services.AddTransient&lt;IHandleMessages&lt;CreateInvoice&gt;, CreateInvoiceHandler&gt;();
+
+var routes = new AzureServiceBusTransportRoutes();
+routes.MapCommand&lt;CreateInvoice&gt;("billing-queue");
+routes.MapCommand&lt;ReserveInventory&gt;("inventory-queue");
+routes.MapEvent&lt;InvoiceCreated&gt;("domain-events");
+routes.MapScheduledMessage&lt;InvoicePaymentTimeout&gt;("billing-timeouts");
+
+services.AddSingleton(routes);
+services.AddSingleton&lt;AzureServiceBusMessageFactory&gt;();
+services.AddSingleton&lt;AzureServiceBusTransportDispatcher&gt;();
+services.AddSingleton(_ =&gt; new ServiceBusClient(serviceBusConnectionString));
+services.AddSingleton&lt;IAzureServiceBusSender, AzureServiceBusSender&gt;();
+services.AddSingleton&lt;IAzureServiceBusDelayedRetryScheduler, AzureServiceBusDelayedRetryScheduler&gt;();
+
+var sagaRegistry = new SagaRegistry();
+sagaRegistry.Register&lt;BillingSaga, BillingSagaData&gt;();
+services.AddSingleton(sagaRegistry);
+services.AddSingleton&lt;SagaInvoker&gt;();
+
+services.AddMiniBusSqlPersistence(sqlConnectionString);</code></pre>
+    </section>
+
+    <section class="section-card card">
+      <h2>8. Operational decisions</h2>
+      <div class="grid-3">
+        <div class="mini-card">
+          <h3>Outbox dispatch</h3>
+          <p>Handler execution and outbox dispatch are intentionally separate. Dispatch can run from an owned timer, worker, hosted dispatcher or separate app.</p>
+        </div>
+        <div class="mini-card">
+          <h3>Delayed retries</h3>
+          <p>Immediate retries run inside the same processor call. Delayed retries use scheduled Azure Service Bus message copies while preserving MiniBus metadata.</p>
+        </div>
+        <div class="mini-card">
+          <h3>SQL schema</h3>
+          <p>MiniBus ships explicit SQL scripts. Applications should apply them through normal database deployment flow before enabling SQL persistence.</p>
+        </div>
+        <div class="mini-card">
+          <h3>Claim-check</h3>
+          <p>Large messages can be written to Blob Storage and replaced by compact broker messages; receive-side resolution happens before handlers see the contract.</p>
+        </div>
+        <div class="mini-card">
+          <h3>Audit blobs</h3>
+          <p>Audit writing is opt-in and fail-closed. If audit is enabled and writing fails, the message is not silently completed as if audit succeeded.</p>
+        </div>
+        <div class="mini-card">
+          <h3>Tooling</h3>
+          <p>Initial tooling is SQL-first: inspect inbox, outbox, sagas, message details and correlations without dumping sensitive payloads by default.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>
+        Generated from the MiniBus repository README files, solution structure, project metadata, and sample Billing/Inventory Function App code.
+        Commit context observed: <code>fe4167834b0c08d91087017362c28c6a45399411</code>.
+      </p>
+    </footer>
+  </main>
+</body>
+</html>
