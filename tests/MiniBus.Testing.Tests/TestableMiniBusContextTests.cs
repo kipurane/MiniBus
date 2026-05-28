@@ -145,6 +145,77 @@ public sealed class TestableMiniBusContextTests
         Assert.Contains("2 were captured", multiple.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("", "message-id", "correlation-id")]
+    [InlineData("   ", "message-id", "correlation-id")]
+    [InlineData("Tests", "", "correlation-id")]
+    [InlineData("Tests", "   ", "correlation-id")]
+    [InlineData("Tests", "message-id", "")]
+    [InlineData("Tests", "message-id", "   ")]
+    public void Constructor_ThrowsWhenRequiredArgumentIsWhiteSpace(string endpointName, string messageId, string correlationId)
+    {
+        Assert.Throws<ArgumentException>(() => new TestableMiniBusContext(
+            endpointName: endpointName,
+            messageId: messageId,
+            correlationId: correlationId));
+    }
+
+    [Fact]
+    public async Task Send_ThrowsWhenCommandIsNull()
+    {
+        var context = new TestableMiniBusContext();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => context.Send<TestCommand>(null!));
+    }
+
+    [Fact]
+    public async Task Publish_ThrowsWhenEventIsNull()
+    {
+        var context = new TestableMiniBusContext();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => context.Publish<TestEvent>(null!));
+    }
+
+    [Fact]
+    public async Task Schedule_ThrowsWhenMessageIsNull()
+    {
+        var context = new TestableMiniBusContext();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => context.Schedule<TestMessage>(null!, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task SinglePublished_FailClearlyWhenZeroOrMultiple()
+    {
+        var context = new TestableMiniBusContext();
+
+        var missing = Assert.Throws<InvalidOperationException>(() => context.SinglePublished<TestEvent>());
+        Assert.Contains("none were captured", missing.Message, StringComparison.Ordinal);
+
+        await context.Publish(new TestEvent("event-1"));
+        await context.Publish(new TestEvent("event-2"));
+
+        var multiple = Assert.Throws<InvalidOperationException>(() => context.SinglePublished<TestEvent>());
+        Assert.Contains("2 were captured", multiple.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SingleScheduled_FailClearlyWhenZeroOrMultiple()
+    {
+        var context = new TestableMiniBusContext();
+        var dueTime = DateTimeOffset.UtcNow.AddMinutes(1);
+
+        var missing = Assert.Throws<InvalidOperationException>(() => context.SingleScheduled<TestMessage>());
+        Assert.Contains("none were captured", missing.Message, StringComparison.Ordinal);
+
+        await context.Schedule(new TestMessage("m-1"), dueTime);
+        await context.Schedule(new TestMessage("m-2"), dueTime);
+
+        var multiple = Assert.Throws<InvalidOperationException>(() => context.SingleScheduled<TestMessage>());
+        Assert.Contains("2 were captured", multiple.Message, StringComparison.Ordinal);
+    }
+
     private sealed record TestMessage(string Id) : IMessage;
 
     private sealed record TestCommand(string Id) : ICommand;
