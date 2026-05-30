@@ -9,6 +9,8 @@ public sealed class MiniBusSqlToolingOptions
 
     public Func<DbConnection>? ConnectionFactory { get; set; }
 
+    public bool IsUiAvailable { get; set; }
+
     public string SchemaName { get; set; } = "MiniBus";
 
     public string InboxTableName { get; set; } = "Inbox";

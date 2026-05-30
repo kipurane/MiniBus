@@ -64,6 +64,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - [`src/MiniBus.Tooling.Core`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Core): provider-neutral operational tooling read models, filters, timeline fragments, and action contracts.
 - [`src/MiniBus.Tooling.Sql`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Sql): SQL-backed tooling readers for inbox, outbox, and saga state plus bounded outbox drain action integration.
 - [`src/MiniBus.Tooling.Cli`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Cli): first command-line surface for local MiniBus troubleshooting over the tooling core.
+- [`src/MiniBus.Tooling.Web`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Tooling.Web): packaged read-only ASP.NET Core Minimal API and React/TypeScript UI for local MiniBus troubleshooting.
 - [`src/MiniBus.Testing`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Testing): lightweight direct handler and saga handler unit-testing helpers.
 - [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators): optional source generators for thin Azure Functions Service Bus trigger wrappers.
 - [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers): optional Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
@@ -274,7 +275,7 @@ dotnet test tests/MiniBus.AcceptanceTests/MiniBus.AcceptanceTests.csproj
 
 ## Operational Tooling
 
-The first MiniBus tooling increment is local and SQL-first. `MiniBus.Tooling.Core` defines provider-neutral records and query/action contracts so the CLI and future UI/API surfaces can describe the same state. `MiniBus.Tooling.Sql` reads the existing SQL inbox, outbox, and saga tables without changing runtime behavior. `MiniBus.Tooling.Cli` is the first front door for troubleshooting.
+MiniBus tooling is local and SQL-first. `MiniBus.Tooling.Core` defines provider-neutral records and query/action contracts so CLI, API, and UI surfaces describe the same state. `MiniBus.Tooling.Sql` reads the existing SQL inbox, outbox, and saga tables without changing runtime behavior. `MiniBus.Tooling.Cli` is the command-line front door for troubleshooting, and `MiniBus.Tooling.Web` packages a read-only ASP.NET Core Minimal API plus React/TypeScript UI for browser-based inspection.
 
 Read-only commands inspect SQL state and do not mutate MiniBus runtime data:
 
@@ -294,7 +295,9 @@ The first explicit action is bounded SQL outbox draining. The action model and S
 minibus --connection-string "$MINIBUS_SQL" outbox drain --max-batches 5
 ```
 
-Tooling avoids dumping full message bodies, full saga data, or credentials by default. Blazor UI, Minimal API, Aspire orchestration, Azure Service Bus inspection, DLQ resubmission, message replay, arbitrary console log scraping, and Azure Monitor/Application Insights querying remain deferred work.
+`MiniBus.Tooling.Web` exposes read-only API endpoints under `/api/tooling` for inbox, outbox, saga, and message/correlation timeline inspection. Configure SQL access through `MiniBus:Tooling:Sql:ConnectionString` and optionally `MiniBus:Tooling:Sql:SchemaName`.
+
+The web UI is also read-only: it lists operational records, shows selected record details, and displays best-effort timelines with unavailable sources called out explicitly. Tooling avoids dumping full message bodies, full saga data, or credentials by default. Aspire orchestration, Azure Service Bus inspection, DLQ resubmission, message replay, arbitrary console log scraping, Azure Monitor/Application Insights querying, and browser-triggered mutating actions remain deferred work.
 
 ## Development Workflow
 
@@ -312,4 +315,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, reference acceptance coverage, and the first SQL/CLI operational tooling foundation in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling surfaces.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, reference acceptance coverage, and SQL-backed CLI/web operational tooling in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling sources.

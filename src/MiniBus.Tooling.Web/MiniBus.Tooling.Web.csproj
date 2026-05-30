@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+        <PackageId>MiniBus.Tooling.Web</PackageId>
+        <Title>MiniBus Tooling Web</Title>
+        <Description>Read-only browser tooling for local MiniBus operational troubleshooting.</Description>
+        <PackageTags>minibus;tooling;web;operations;diagnostics;messaging</PackageTags>
+        <ClientAppDir>ClientApp\</ClientAppDir>
+        <DefaultItemExcludes>$(DefaultItemExcludes);ClientApp\node_modules\**;ClientApp\dist\**</DefaultItemExcludes>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../MiniBus.Tooling.Core/MiniBus.Tooling.Core.csproj" />
+        <ProjectReference Include="../MiniBus.Tooling.Sql/MiniBus.Tooling.Sql.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Remove="ClientApp\node_modules\**" />
+        <None Remove="ClientApp\node_modules\**" />
+        <Content Remove="ClientApp\dist\**" />
+        <None Remove="ClientApp\dist\**" />
+        <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <Target Name="BuildClientApp" BeforeTargets="Publish;Pack" Condition="'$(SkipClientBuild)' != 'true'">
+        <Exec WorkingDirectory="$(ClientAppDir)" Command="npm install" Condition="!Exists('$(ClientAppDir)node_modules')" />
+        <Exec WorkingDirectory="$(ClientAppDir)" Command="npm run build" />
+    </Target>
+
+</Project>

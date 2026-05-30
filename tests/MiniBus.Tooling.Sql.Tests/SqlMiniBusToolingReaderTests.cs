@@ -75,6 +75,36 @@ public sealed class SqlMiniBusToolingReaderTests
         Assert.Equal("filter", exception.ParamName);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("99")]
+    [InlineData("Pending,Claimed")]
+    public async Task OutboxReader_InvalidStatusReturnsUnsupportedWithoutOpeningConnection(string status)
+    {
+        var reader = CreateReaderWithoutConnection();
+
+        var result = await ((IMiniBusOutboxToolingReader)reader).ListAsync(
+            new MiniBusToolingQueryFilter { Status = status });
+
+        Assert.False(result.IsSupported);
+        Assert.Contains("Pending", result.UnsupportedReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("99")]
+    [InlineData("Active,Completed")]
+    public async Task SagaReader_InvalidStatusReturnsUnsupportedWithoutOpeningConnection(string status)
+    {
+        var reader = CreateReaderWithoutConnection();
+
+        var result = await ((IMiniBusSagaToolingReader)reader).ListAsync(
+            new MiniBusToolingQueryFilter { Status = status });
+
+        Assert.False(result.IsSupported);
+        Assert.Contains("Active", result.UnsupportedReason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static SqlMiniBusToolingReader CreateReaderWithoutConnection()
     {
         return new SqlMiniBusToolingReader(new MiniBusSqlToolingOptions

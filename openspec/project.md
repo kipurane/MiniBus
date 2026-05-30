@@ -183,6 +183,8 @@ MiniBus.sln
 
   /MiniBus.Tooling.Cli
 
+  /MiniBus.Tooling.Web
+
   /MiniBus.Testing
 
   /MiniBus.Templates
@@ -1260,6 +1262,7 @@ Implemented baseline:
 - Best-effort SQL message/correlation timeline assembly.
 - Bounded SQL outbox drain action wrapper over `SqlMiniBusOutboxDispatcher`.
 - First CLI command surface for local SQL troubleshooting with table and JSON output.
+- Packaged `MiniBus.Tooling.Web` surface with a read-only ASP.NET Core Minimal API and React/TypeScript UI for local list, detail, and timeline inspection.
 - Documentation for local SQL configuration, read-only inspection, explicit actions, redaction defaults, and deferred tooling surfaces.
 
 Planned direction:
@@ -1269,8 +1272,7 @@ Planned direction:
 - Use a local UI for correlated operational understanding: message timelines, inbox/outbox state, saga state, dispatch outcomes, logs, traces, metrics, and broker state.
 - Keep tooling focused on observing and operating MiniBus runtime state; it must not become a second message-processing runtime.
 - Prefer provider modules for SQL persistence, Azure Service Bus, and observability backends.
-- Package the browser tooling experience as `MiniBus.Tooling.Web`: an ASP.NET Core Minimal API plus a React and TypeScript UI served by the web app.
-- Keep the first `MiniBus.Tooling.Web` UI slice read-only: timeline, list, and detail views for inbox, outbox, saga, and correlated message state.
+- Evolve `MiniBus.Tooling.Web` with additional read-only providers before adding mutating browser actions.
 - Prefer Aspire for local sample orchestration when running SQL Server, Service Bus emulator, Function Apps, dispatcher hosts, and `MiniBus.Tooling.Web` together.
 - Keep Aspire as a development/sample orchestration concern rather than a runtime dependency of MiniBus packages.
 
@@ -1409,8 +1411,8 @@ The first tooling increment should harden a shared model before investing heavil
 - [ ] Add Azure Service Bus inspection for queues, topics, subscriptions, active/dead-letter counts, and dead-letter peek where credentials allow it.
 - [ ] Decide the first structured log source for local tooling, such as JSON log files, OpenTelemetry collector output, or a MiniBus-native audit/event store.
 - [x] Add a CLI console app over the shared tooling core for local troubleshooting, scripts, and CI diagnostics.
-- [ ] Add `MiniBus.Tooling.Web` as a packaged ASP.NET Core Minimal API over the shared tooling core so the UI and future remote tooling use a stable HTTP boundary.
-- [ ] Add a React and TypeScript UI served by `MiniBus.Tooling.Web`, focused first on read-only correlated message timelines, inbox/outbox state, saga state, and list/detail troubleshooting views.
+- [x] Add `MiniBus.Tooling.Web` as a packaged ASP.NET Core Minimal API over the shared tooling core so the UI and future remote tooling use a stable HTTP boundary.
+- [x] Add a React and TypeScript UI served by `MiniBus.Tooling.Web`, focused first on read-only correlated message timelines, inbox/outbox state, saga state, and list/detail troubleshooting views.
 - [ ] Add Aspire-based local orchestration for the reference samples, SQL Server, Service Bus emulator, dispatcher host, and `MiniBus.Tooling.Web`.
 - [x] Document local-only versus Azure-hosted tooling deployment guidance, including credential handling, read/write action safety, and redaction expectations.
 

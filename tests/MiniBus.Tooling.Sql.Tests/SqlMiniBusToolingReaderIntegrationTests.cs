@@ -118,6 +118,22 @@ public sealed class SqlMiniBusToolingReaderIntegrationTests :
     }
 
     [SqlServerFact]
+    public async Task Timeline_DefaultSqlReaderDoesNotAdvertiseUiSource()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await database.InsertInboxAsync("Billing", "message-1", "correlation-1");
+        var reader = database.CreateReader();
+
+        var timeline = await reader.ReadAsync(new MiniBusTimelineQuery { MessageId = "message-1" });
+
+        var uiSource = Assert.Single(
+            timeline.Sources,
+            source => source.Source == MiniBusTimelineSource.Ui);
+        Assert.False(uiSource.IsAvailable);
+        Assert.Contains("UI tooling provider", uiSource.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [SqlServerFact]
     public async Task Timeline_ResolvesCorrelationFromOutboxColumnWhenHeadersAreInvalid()
     {
         await using var database = await _fixture.CreateDatabaseAsync();

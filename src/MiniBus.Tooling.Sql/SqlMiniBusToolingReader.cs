@@ -22,6 +22,7 @@ public sealed class SqlMiniBusToolingReader :
 
     private readonly MiniBusSqlToolingOptions _options;
     private readonly SqlToolingTableNames _tableNames;
+    private readonly bool _isUiAvailable;
 
     public SqlMiniBusToolingReader(MiniBusSqlToolingOptions options)
     {
@@ -36,6 +37,7 @@ public sealed class SqlMiniBusToolingReader :
 
         _options = options;
         _tableNames = new SqlToolingTableNames(options);
+        _isUiAvailable = options.IsUiAvailable;
     }
 
     public async Task<MiniBusToolingQueryResult<MiniBusInboxRecord>> ListAsync(
@@ -407,7 +409,7 @@ public sealed class SqlMiniBusToolingReader :
         return new MiniBusMessageTimeline(
             query,
             fragments,
-            CreateSourceAvailability());
+            CreateSourceAvailability(_isUiAvailable));
     }
 
     private static MiniBusTimelineFragment ToFragment(MiniBusInboxRecord record)
@@ -459,7 +461,7 @@ public sealed class SqlMiniBusToolingReader :
             });
     }
 
-    private static IReadOnlyList<MiniBusTimelineSourceAvailability> CreateSourceAvailability()
+    private static IReadOnlyList<MiniBusTimelineSourceAvailability> CreateSourceAvailability(bool isUiAvailable)
     {
         return new[]
         {
@@ -470,7 +472,11 @@ public sealed class SqlMiniBusToolingReader :
             new MiniBusTimelineSourceAvailability(MiniBusTimelineSource.Logs, false, "Structured log tooling provider is not configured."),
             new MiniBusTimelineSourceAvailability(MiniBusTimelineSource.Traces, false, "Trace tooling provider is not configured."),
             new MiniBusTimelineSourceAvailability(MiniBusTimelineSource.Audit, false, "Audit tooling provider is not configured."),
-            new MiniBusTimelineSourceAvailability(MiniBusTimelineSource.Ui, false, "The first tooling increment does not include a UI.")
+            new MiniBusTimelineSourceAvailability(MiniBusTimelineSource.Metrics, false, "Metrics tooling provider is not configured."),
+            new MiniBusTimelineSourceAvailability(
+                MiniBusTimelineSource.Ui,
+                isUiAvailable,
+                isUiAvailable ? null : "UI tooling provider is not configured.")
         };
     }
 
@@ -501,7 +507,7 @@ public sealed class SqlMiniBusToolingReader :
             return null;
         }
 
-        if (Enum.TryParse(filter.Status, ignoreCase: true, out MiniBusOutboxStatus parsedStatus))
+        if (TryParseNamedEnum(filter.Status, out MiniBusOutboxStatus parsedStatus))
         {
             status = parsedStatus;
             return null;
@@ -526,7 +532,7 @@ public sealed class SqlMiniBusToolingReader :
             return null;
         }
 
-        if (Enum.TryParse(filter.Status, ignoreCase: true, out MiniBusSagaStatus parsedStatus))
+        if (TryParseNamedEnum(filter.Status, out MiniBusSagaStatus parsedStatus))
         {
             status = parsedStatus;
             return null;
@@ -650,6 +656,26 @@ public sealed class SqlMiniBusToolingReader :
     private static string Summarize(string value)
     {
         return SqlToolingTextRedactor.RedactAndTruncate(value, ErrorSummaryMaxLength);
+    }
+
+    private static class EnumNameCache<TEnum>
+        where TEnum : struct, Enum
+    {
+        public static readonly HashSet<string> Names =
+            new(Enum.GetNames<TEnum>(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParseNamedEnum<TEnum>(string value, out TEnum parsed)
+        where TEnum : struct, Enum
+    {
+        var trimmedValue = value.Trim();
+        if (!EnumNameCache<TEnum>.Names.Contains(trimmedValue))
+        {
+            parsed = default;
+            return false;
+        }
+
+        return Enum.TryParse(trimmedValue, ignoreCase: true, out parsed);
     }
 
     private static bool StringEquals(string? left, string? right)

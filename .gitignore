@@ -8,3 +8,4 @@ obj/
 *.sln.iml
 *.DotSettings.user
 /_ReSharper.Caches/
+node_modules/
