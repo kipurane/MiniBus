@@ -26,6 +26,8 @@ Apply every script in `src/MiniBus.Persistence.Sql/Schema/` to the target databa
 
 MiniBus ships explicit scripts instead of applying migrations at runtime. The scripts target the default `MiniBus` schema and table names. If an application configures custom SQL schema or table names, adapt the scripts through the application's normal database deployment process.
 
+Configured SQL schema and table names are treated as identifiers, not SQL fragments. Runtime SQL commands bracket-quote each configured schema/table identifier and escape closing brackets before interpolation. Empty, whitespace-only, and control-character identifiers are rejected.
+
 Register SQL persistence with a SQL Server or Azure SQL connection string:
 
 ```csharp
@@ -51,11 +53,11 @@ services.AddMiniBusSqlPersistence(options =>
 
 ## Inbox and outbox behavior
 
-When SQL persistence is enabled, MiniBus checks the inbox before invoking handlers. Duplicate messages are completed or skipped without invoking handlers again. Successful processing commits the inbox record and captured outbox operations before the Azure Functions adapter completes the received Service Bus message.
+When SQL persistence is enabled, MiniBus checks the inbox before invoking handlers or sagas. Duplicate messages are completed or skipped without invoking handlers or sagas again. Successful processing commits the inbox record, captured outbox operations, and any saga state changes in one SQL transaction before the Azure Functions adapter completes the received Service Bus message. If that SQL commit fails, none of the inbox, outbox, or saga changes from the attempt are durable and the message is not treated as complete.
 
 Outgoing operations are at-least-once. The SQL outbox dispatcher claims a bounded batch, dispatches each operation through the configured transport, and marks successful rows dispatched. If a process exits after the broker accepts a message but before the row is marked dispatched, the operation can be sent again. Use deterministic outgoing message ids, broker duplicate detection where configured, and idempotent receivers.
 
-Outbox dispatch is separate from handler execution. Handlers finish by committing inbox and outbox state durably; transport dispatch happens later through either an application-owned manual drain or the optional hosted drain. That separation is what lets the SQL outbox recover after process crashes without holding broker calls inside the SQL transaction.
+Outbox dispatch is separate from handler and saga execution. Handlers and sagas finish by committing inbox, outbox, and saga state durably; transport dispatch happens later through either an application-owned manual drain or the optional hosted drain. That separation is what lets the SQL outbox recover after process crashes without holding broker calls inside the SQL transaction.
 
 Manual dispatch remains the default and is the right fit for dedicated dispatcher processes, timer-triggered drains, tests, and hosts that need custom scheduling:
 
@@ -133,6 +135,14 @@ Outbox claims use `OutboxClaimLeaseDuration`; abandoned claims become eligible f
 ## SQL saga persistence
 
 SQL persistence registers SQL-backed `ISagaPersistence` when no custom saga persistence has already been registered. Saga data is stored by saga data type and correlation id using the configured MiniBus serializer. Saves and completions use SQL Server rowversion metadata for optimistic concurrency; stale updates fail with `SagaPersistenceException` and flow through normal message recoverability.
+
+When SQL persistence is registered through dependency injection, `SqlSagaDataSerializer` uses the registered `IMessageSerializer`, matching outbox message serialization. Applications that manually construct `SqlMiniBusPersistenceSessionFactory` should prefer the overload that accepts `IMessageSerializer` so outbox operations and saga data use the same serializer. The older convenience constructors that accept only `SqlOutboxOperationSerializer` are obsolete because they keep saga serialization on `SystemTextJsonMessageSerializer`; use the explicit `SqlSagaDataSerializer` overload when saga data intentionally uses different serialization.
+
+Saga versions returned from `ISagaPersistence.LoadAsync` are opaque concurrency tokens. SQL persistence encodes the SQL Server 8-byte `rowversion` value as base64; callers should only store or pass the token back unchanged to `SaveAsync` or `CompleteAsync`. Missing, blank, invalid-base64, or wrong-length SQL saga version tokens are rejected with `ArgumentException`. Well-formed rowversion tokens that no longer match the stored row, or rows that no longer exist, fail with `SagaPersistenceException`.
+
+During SQL-backed message processing, saga load/create/save/complete operations use the active SQL persistence session. This means saga mutations share the same SQL connection and transaction as the inbox record and outbox rows for that processing attempt. Saga state becomes durable only when the processing transaction commits. If saga handling succeeds but outbox insertion, inbox insertion, or transaction commit fails, the saga mutation rolls back with the rest of the attempt.
+
+The standalone SQL-backed `ISagaPersistence` service remains useful for tests, tooling, and explicit administrative code that needs direct saga lifecycle access. It is not the atomic message-processing path by itself. Custom persistence providers that want the same transactional guarantee must make their active processing session provide saga persistence; otherwise they can only offer their own documented consistency model.
 
 Keep saga data focused on workflow state. Data type renames and shape migrations are application-owned because stored saga rows are keyed by data type identity.
 

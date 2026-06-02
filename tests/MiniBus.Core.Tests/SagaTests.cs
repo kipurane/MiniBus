@@ -21,6 +21,17 @@ public sealed class SagaTests
     }
 
     [Fact]
+    public void SagaPersistenceException_PreservesInnerException()
+    {
+        var inner = new InvalidOperationException("provider failure");
+
+        var exception = new SagaPersistenceException("saga persistence failed", inner);
+
+        Assert.Equal("saga persistence failed", exception.Message);
+        Assert.Same(inner, exception.InnerException);
+    }
+
+    [Fact]
     public async Task SagaMapper_ResolvesStartingAndContinuingCorrelation()
     {
         var mapper = new SagaMapper<OrderSagaData>()
@@ -79,6 +90,49 @@ public sealed class SagaTests
     }
 
     [Fact]
+    public async Task SagaRegistry_DefinitionsEnumerationRemainsStableDuringRegistration()
+    {
+        var registry = new SagaRegistry();
+        registry.Register<OrderSaga, OrderSagaData>();
+
+        var firstItemRead = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueEnumeration = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var reader = Task.Run(async () =>
+        {
+            var sagaTypes = new List<Type>();
+
+            foreach (var definition in registry.Definitions)
+            {
+                sagaTypes.Add(definition.SagaType);
+                firstItemRead.TrySetResult(null);
+                await continueEnumeration.Task;
+            }
+
+            return sagaTypes;
+        });
+
+        await firstItemRead.Task;
+        registry.Register<TimeoutStartingSaga, OrderSagaData>();
+        continueEnumeration.SetResult(null);
+
+        var observedSagaTypes = await reader;
+
+        Assert.Equal([typeof(OrderSaga)], observedSagaTypes);
+        Assert.Equal(2, registry.Definitions.Count);
+    }
+
+    [Fact]
+    public void SagaRegistry_DoesNotExposeMutableBackingCollections()
+    {
+        var registry = new SagaRegistry();
+        registry.Register<OrderSaga, OrderSagaData>();
+
+        Assert.False(registry.Definitions is SagaDefinition[]);
+        Assert.False(registry.GetDefinitionsForMessage(typeof(StartOrder)) is SagaDefinition[]);
+    }
+
+    [Fact]
     public async Task InMemorySagaPersistence_LoadCreateSaveAndComplete()
     {
         var persistence = new InMemorySagaPersistence();
@@ -103,6 +157,33 @@ public sealed class SagaTests
         Assert.NotNull(completed);
         Assert.True(completed.Data.IsCompleted);
         Assert.Equal("3", completed.Version);
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_RejectsCompletionRegression()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+
+        await persistence.CreateAsync(data);
+        var loaded = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(loaded);
+
+        await persistence.CompleteAsync(loaded.Data, loaded.Version);
+
+        var completed = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(completed);
+        completed.Data.IsCompleted = false;
+
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(completed.Data, completed.Version));
+
+        Assert.Contains("cannot be marked incomplete", exception.Message, StringComparison.Ordinal);
+
+        var reloaded = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded.Data.IsCompleted);
+        Assert.Equal(completed.Version, reloaded.Version);
     }
 
     [Fact]
@@ -149,6 +230,27 @@ public sealed class SagaTests
     }
 
     [Fact]
+    public async Task SagaInvoker_StartsAndCompletesNewSagaThroughCreate()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<CompletingStartingSaga, OrderSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+
+        await invoker.InvokeAsync(
+            new StartAndCompleteOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None);
+
+        var stored = await persistence.LoadAsync<OrderSagaData>("order-1");
+        Assert.NotNull(stored);
+        Assert.True(stored.Data.IsCompleted);
+        Assert.Equal("completed", stored.Data.Step);
+        Assert.Equal("1", stored.Version);
+    }
+
+    [Fact]
     public async Task SagaInvoker_LoadsExistingSagaAndSavesState()
     {
         ResetSagaCounters();
@@ -174,6 +276,20 @@ public sealed class SagaTests
         Assert.Equal("2", stored.Version);
         Assert.Equal("1", loadedBefore!.Version);
         Assert.Equal(1, OrderSaga.BilledCount);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_ThrowsClearErrorWhenLoadedSagaHasNoVersion()
+    {
+        var invoker = CreateInvoker(new MissingVersionSagaPersistence());
+
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() => invoker.InvokeAsync(
+            new OrderBilled("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None));
+
+        Assert.Contains("without a version token", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -417,6 +533,8 @@ public sealed class SagaTests
 
     private sealed record StartOrder(string OrderId) : ICommand;
 
+    private sealed record StartAndCompleteOrder(string OrderId) : ICommand;
+
     private sealed record OrderBilled(string OrderId) : IEvent;
 
     private sealed record FailOrder(string OrderId) : IEvent;
@@ -542,6 +660,66 @@ public sealed class SagaTests
         {
             Data.Step = "started-by-timeout";
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CompletingStartingSaga :
+        MiniBusSaga<OrderSagaData>,
+        IHandleSagaMessages<StartAndCompleteOrder>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
+        {
+            mapper.StartsWith<StartAndCompleteOrder>(message => message.OrderId);
+        }
+
+        public Task Handle(StartAndCompleteOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Step = "completed";
+            MarkAsComplete();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class MissingVersionSagaPersistence : ISagaPersistence
+    {
+        public Task<SagaPersistenceRecord<TData>?> LoadAsync<TData>(
+            string correlationId,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            var data = new TData
+            {
+                Id = Guid.NewGuid(),
+                CorrelationId = correlationId
+            };
+            return Task.FromResult<SagaPersistenceRecord<TData>?>(
+                new SagaPersistenceRecord<TData>(data, Version: null!));
+        }
+
+        public Task CreateAsync<TData>(
+            TData data,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task SaveAsync<TData>(
+            TData data,
+            string version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task CompleteAsync<TData>(
+            TData data,
+            string version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            throw new NotSupportedException();
         }
     }
 

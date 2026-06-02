@@ -50,6 +50,7 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
             throw new InvalidOperationException("MiniBus handler context must be created before saga invocation.");
         }
 
+        var sessionSagaPersistence = context.PersistenceSession as ISagaPersistence;
         await _sagaInvoker
             .InvokeAsync(
                 context.DeserializedMessage,
@@ -66,7 +67,9 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
                         _processingTracer.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
                     }
                 },
-                (sagaType, _, invoke) => _processingMetrics.MeasureSagaInvocationAsync(context, sagaType, invoke))
+                (sagaType, _, invoke) => _processingMetrics.MeasureSagaInvocationAsync(context, sagaType, invoke),
+                sessionSagaPersistence,
+                requireInvocationPersistence: context.PersistenceSession is not null)
             .ConfigureAwait(false);
 
         await next(context, cancellationToken).ConfigureAwait(false);

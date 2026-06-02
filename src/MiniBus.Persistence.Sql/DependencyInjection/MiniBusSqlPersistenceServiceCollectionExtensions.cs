@@ -56,6 +56,7 @@ public static class MiniBusSqlPersistenceServiceCollectionExtensions
             new SqlMiniBusPersistenceSessionFactory(
                 serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>(),
                 serviceProvider.GetRequiredService<SqlOutboxOperationSerializer>(),
+                serviceProvider.GetRequiredService<SqlSagaDataSerializer>(),
                 serviceProvider.GetRequiredService<ISqlMiniBusOutboxDispatchSignal>(),
                 serviceProvider.GetService<ILogger<SqlMiniBusPersistenceSession>>()));
         RegisterSqlSagaPersistence(services);

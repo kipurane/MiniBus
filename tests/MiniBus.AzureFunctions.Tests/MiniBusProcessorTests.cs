@@ -1427,6 +1427,39 @@ public sealed class MiniBusProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_WithPersistenceSessionUsesSessionSagaPersistence()
+    {
+        BillingSaga.HandledCount = 0;
+        var session = new RecordingPersistenceSession();
+        var fallbackPersistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<BillingSaga, BillingSagaData>();
+        var processor = CreateProcessor(new RecordingSerializer(new StartBillingSaga("billing-1")), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(fallbackPersistence);
+            services.AddSingleton<SagaInvoker>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+        }, options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartBillingSaga).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageId] = "message-1"
+        });
+
+        await processor.ProcessAsync(message, new RecordingMessageActions());
+
+        var sessionStored = await session.LoadAsync<BillingSagaData>("billing-1");
+        var fallbackStored = await fallbackPersistence.LoadAsync<BillingSagaData>("billing-1");
+        Assert.NotNull(sessionStored);
+        Assert.Null(fallbackStored);
+        Assert.Equal(2, session.LoadCount);
+        Assert.Equal(1, session.CreateCount);
+        Assert.Equal(1, BillingSaga.HandledCount);
+        Assert.NotNull(session.CommittedMessage);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ThrowsWhenSagasAreEnabledWithoutSagaInvoker()
     {
         var processor = CreateProcessor(
@@ -1465,6 +1498,39 @@ public sealed class MiniBusProcessorTests
         await processor.ProcessAsync(message, actions);
 
         Assert.Empty(recorder.Invocations);
+        Assert.Same(message, actions.CompletedMessage);
+        Assert.Equal("original-message", session.CheckedMessage?.MessageId);
+        Assert.Null(session.CommittedMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DuplicateSqlInboxSagaMessageDoesNotInvokeOrMutateSaga()
+    {
+        BillingSaga.HandledCount = 0;
+        var session = new RecordingPersistenceSession { IsProcessed = true };
+        var registry = new SagaRegistry();
+        registry.Register<BillingSaga, BillingSagaData>();
+        var processor = CreateProcessor(new RecordingSerializer(new StartBillingSaga("billing-1")), services =>
+        {
+            services.AddSingleton(registry);
+            services.AddSingleton<ISagaPersistence>(new InMemorySagaPersistence());
+            services.AddSingleton<SagaInvoker>();
+            services.AddSingleton<IMiniBusPersistenceSessionFactory>(new RecordingPersistenceSessionFactory(session));
+        }, options => options.EnableSagas = true);
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = typeof(StartBillingSaga).AssemblyQualifiedName!,
+            [MiniBusRecoverabilityHeaderNames.OriginalMessageId] = "original-message"
+        });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Equal(0, BillingSaga.HandledCount);
+        Assert.Equal(0, session.LoadCount);
+        Assert.Equal(0, session.CreateCount);
+        Assert.Equal(0, session.SaveCount);
+        Assert.Equal(0, session.CompleteCount);
         Assert.Same(message, actions.CompletedMessage);
         Assert.Equal("original-message", session.CheckedMessage?.MessageId);
         Assert.Null(session.CommittedMessage);
@@ -2250,8 +2316,10 @@ public sealed class MiniBusProcessorTests
         }
     }
 
-    private sealed class RecordingPersistenceSession : IMiniBusPersistenceSession
+    private sealed class RecordingPersistenceSession : IMiniBusPersistenceSession, ISagaPersistence
     {
+        private readonly InMemorySagaPersistence _sagaPersistence = new();
+
         public bool IsProcessed { get; init; }
 
         public MiniBusInboxMessage? CheckedMessage { get; private set; }
@@ -2263,6 +2331,14 @@ public sealed class MiniBusProcessorTests
         public Exception? CommitException { get; init; }
 
         public Action? OnCommit { get; set; }
+
+        public int LoadCount { get; private set; }
+
+        public int CreateCount { get; private set; }
+
+        public int SaveCount { get; private set; }
+
+        public int CompleteCount { get; private set; }
 
         public Task<bool> TryBeginAsync(
             MiniBusInboxMessage message,
@@ -2295,6 +2371,44 @@ public sealed class MiniBusProcessorTests
             CommittedMessage = message;
             CommittedOperations.AddRange(outboxOperations);
             return Task.CompletedTask;
+        }
+
+        public Task<SagaPersistenceRecord<TData>?> LoadAsync<TData>(
+            string correlationId,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            LoadCount++;
+            return _sagaPersistence.LoadAsync<TData>(correlationId, cancellationToken);
+        }
+
+        public Task CreateAsync<TData>(
+            TData data,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            CreateCount++;
+            return _sagaPersistence.CreateAsync(data, cancellationToken);
+        }
+
+        public Task SaveAsync<TData>(
+            TData data,
+            string version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            SaveCount++;
+            return _sagaPersistence.SaveAsync(data, version, cancellationToken);
+        }
+
+        public Task CompleteAsync<TData>(
+            TData data,
+            string version,
+            CancellationToken cancellationToken = default)
+            where TData : class, ISagaData, new()
+        {
+            CompleteCount++;
+            return _sagaPersistence.CompleteAsync(data, version, cancellationToken);
         }
 
         public ValueTask DisposeAsync()

@@ -15,7 +15,7 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
         CancellationToken cancellationToken = default)
         where TData : class, ISagaData, new()
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId, nameof(correlationId));
 
         if (!_sagas.TryGetValue((typeof(TData), correlationId), out var storedSaga))
         {
@@ -36,7 +36,7 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
         where TData : class, ISagaData, new()
     {
         ArgumentNullException.ThrowIfNull(data);
-        ArgumentException.ThrowIfNullOrWhiteSpace(data.CorrelationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(data.CorrelationId, nameof(ISagaData.CorrelationId));
 
         var key = (typeof(TData), data.CorrelationId);
         if (_sagas.ContainsKey(key))
@@ -50,7 +50,7 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
 
     public Task SaveAsync<TData>(
         TData data,
-        string? version,
+        string version,
         CancellationToken cancellationToken = default)
         where TData : class, ISagaData, new()
     {
@@ -59,7 +59,7 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
 
     public Task CompleteAsync<TData>(
         TData data,
-        string? version,
+        string version,
         CancellationToken cancellationToken = default)
         where TData : class, ISagaData, new()
     {
@@ -67,11 +67,12 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
         return StoreExisting(data, version, complete: true);
     }
 
-    private Task StoreExisting<TData>(TData data, string? version, bool complete)
+    private Task StoreExisting<TData>(TData data, string version, bool complete)
         where TData : class, ISagaData, new()
     {
         ArgumentNullException.ThrowIfNull(data);
-        ArgumentException.ThrowIfNullOrWhiteSpace(data.CorrelationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(data.CorrelationId, nameof(ISagaData.CorrelationId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(version, nameof(version));
 
         var key = (typeof(TData), data.CorrelationId);
         if (!_sagas.TryGetValue(key, out var storedSaga))
@@ -79,13 +80,19 @@ public sealed class InMemorySagaPersistence : ISagaPersistence
             throw new SagaPersistenceException($"Saga data '{typeof(TData).FullName}' with correlation id '{data.CorrelationId}' does not exist.");
         }
 
-        if (!string.IsNullOrWhiteSpace(version)
-            && !string.Equals(version, storedSaga.Version.ToString(), StringComparison.Ordinal))
+        if (!string.Equals(version, storedSaga.Version.ToString(), StringComparison.Ordinal))
         {
             throw new SagaPersistenceException($"Saga data '{typeof(TData).FullName}' with correlation id '{data.CorrelationId}' has a stale version.");
         }
 
-        data.IsCompleted = complete || data.IsCompleted;
+        var isCompleted = complete || data.IsCompleted;
+        if (storedSaga.Data is ISagaData storedData && storedData.IsCompleted && !isCompleted)
+        {
+            throw new SagaPersistenceException(
+                $"Saga data '{typeof(TData).FullName}' with correlation id '{data.CorrelationId}' is already completed and cannot be marked incomplete.");
+        }
+
+        data.IsCompleted = isCompleted;
         _sagas[key] = new StoredSaga(Clone(data), storedSaga.Version + 1);
         return Task.CompletedTask;
     }

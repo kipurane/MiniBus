@@ -469,6 +469,69 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
     }
 
     [SqlServerFact]
+    public async Task SagaPersistence_CompleteAsyncDoesNotRequireCallerDataToBeMarkedCompleted()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var data = CreateSagaData("saga-complete-column");
+
+        await persistence.CreateAsync(data);
+
+        var loaded = await persistence.LoadAsync<TestSagaData>("saga-complete-column");
+        Assert.NotNull(loaded);
+        Assert.False(loaded.Data.IsCompleted);
+
+        await persistence.CompleteAsync(loaded.Data, loaded.Version);
+
+        Assert.False(loaded.Data.IsCompleted);
+        var completed = await persistence.LoadAsync<TestSagaData>("saga-complete-column");
+        Assert.NotNull(completed);
+        Assert.True(completed.Data.IsCompleted);
+        Assert.NotNull(await database.QueryScalarAsync<DateTimeOffset?>(
+            $"SELECT CompletedUtc FROM {database.SagaTableName} WHERE Id = @Id;",
+            data.Id));
+    }
+
+    [SqlServerFact]
+    public async Task SagaPersistence_RejectsCompletionRegression()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var data = CreateSagaData("saga-completion-regression");
+
+        await persistence.CreateAsync(data);
+
+        var loaded = await persistence.LoadAsync<TestSagaData>("saga-completion-regression");
+        Assert.NotNull(loaded);
+
+        await persistence.CompleteAsync(loaded.Data, loaded.Version);
+
+        var completed = await persistence.LoadAsync<TestSagaData>("saga-completion-regression");
+        Assert.NotNull(completed);
+        var completedUtc = await database.QueryScalarAsync<DateTimeOffset?>(
+            $"SELECT CompletedUtc FROM {database.SagaTableName} WHERE Id = @Id;",
+            data.Id);
+        Assert.NotNull(completedUtc);
+
+        completed.Data.IsCompleted = false;
+
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(completed.Data, completed.Version));
+
+        Assert.Contains("cannot be marked incomplete", exception.Message, StringComparison.Ordinal);
+
+        var reloaded = await persistence.LoadAsync<TestSagaData>("saga-completion-regression");
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded.Data.IsCompleted);
+        Assert.Equal(completed.Version, reloaded.Version);
+        Assert.Equal(
+            completedUtc,
+            await database.QueryScalarAsync<DateTimeOffset?>(
+                $"SELECT CompletedUtc FROM {database.SagaTableName} WHERE Id = @Id;",
+                data.Id));
+    }
+
+    [SqlServerFact]
     public async Task SagaPersistence_RejectsDuplicateMissingAndStaleState()
     {
         await using var database = await _fixture.CreateDatabaseAsync();
@@ -481,7 +544,19 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             persistence.CreateAsync(CreateSagaData("saga-concurrency")));
 
         await Assert.ThrowsAsync<SagaPersistenceException>(() =>
-            persistence.SaveAsync(CreateSagaData("missing-saga"), version: "AQIDBA=="));
+            persistence.SaveAsync(CreateSagaData("missing-saga"), version: "AQIDBAUGBwg="));
+        var nullVersion = await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+            persistence.SaveAsync(CreateSagaData("saga-concurrency"), version: null!));
+        Assert.Equal("version", nullVersion.ParamName);
+        var blankVersion = await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+            persistence.CompleteAsync(CreateSagaData("saga-concurrency"), version: " "));
+        Assert.Equal("version", blankVersion.ParamName);
+        var invalidVersion = await Assert.ThrowsAsync<ArgumentException>(() =>
+            persistence.SaveAsync(CreateSagaData("saga-concurrency"), version: "not-base64"));
+        Assert.Equal("version", invalidVersion.ParamName);
+        var wrongLengthVersion = await Assert.ThrowsAsync<ArgumentException>(() =>
+            persistence.SaveAsync(CreateSagaData("saga-concurrency"), version: "AQIDBA=="));
+        Assert.Equal("version", wrongLengthVersion.ParamName);
 
         var firstLoad = await persistence.LoadAsync<TestSagaData>("saga-concurrency");
         var secondLoad = await persistence.LoadAsync<TestSagaData>("saga-concurrency");
@@ -530,13 +605,16 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         var invoker = new SagaInvoker(registry, persistence);
         var dueTime = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
         var context = new RecordingMiniBusContext();
+        await using var session = await database.CreateSessionAsync();
+        var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
 
         await invoker.InvokeAsync(
             new StartTimeoutSaga("saga-timeout", dueTime),
             context,
-            EmptyServiceProvider.Instance);
+            EmptyServiceProvider.Instance,
+            persistence: sessionSagaPersistence,
+            requireInvocationPersistence: true);
 
-        await using var session = await database.CreateSessionAsync();
         await session.CommitAsync(
             database.CreateInboxMessage("message-timeout"),
             context.Operations);
@@ -563,6 +641,157 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Equal(dueTime, reader.GetFieldValue<DateTimeOffset>(3));
         Assert.Equal("correlation-1", reader.GetString(4));
         Assert.False(await reader.ReadAsync());
+    }
+
+    [SqlServerFact]
+    public async Task SagaProcessing_StartingSagaCanCompleteWithoutBlindUpdate()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<CompletingStartingSaga, TestSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+        var context = new RecordingMiniBusContext();
+        await using var session = await database.CreateSessionAsync();
+        var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+
+        await invoker.InvokeAsync(
+            new StartAndCompleteSaga("saga-start-complete"),
+            context,
+            EmptyServiceProvider.Instance,
+            persistence: sessionSagaPersistence,
+            requireInvocationPersistence: true);
+        await session.CommitAsync(
+            database.CreateInboxMessage("message-saga-start-complete"),
+            context.Operations);
+
+        var saga = await persistence.LoadAsync<TestSagaData>("saga-start-complete");
+        Assert.NotNull(saga);
+        Assert.True(saga.Data.IsCompleted);
+        Assert.Equal("completed", saga.Data.Status);
+    }
+
+    [SqlServerFact]
+    public async Task SagaProcessing_RollsBackCreatedSagaWhenOutboxInsertFails()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutRequestSaga, TestSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+        var context = new RecordingMiniBusContext();
+        await using var session = await database.CreateSessionAsync();
+        var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+        var inboxMessage = database.CreateInboxMessage("message-saga-create-rollback");
+
+        await invoker.InvokeAsync(
+            new StartTimeoutSaga("saga-create-rollback", DateTimeOffset.UtcNow.AddMinutes(5)),
+            context,
+            EmptyServiceProvider.Instance,
+            persistence: sessionSagaPersistence,
+            requireInvocationPersistence: true);
+        await database.DropOutboxTableAsync();
+
+        await Assert.ThrowsAsync<SqlException>(() => session.CommitAsync(inboxMessage, context.Operations));
+
+        await using var verificationSession = await database.CreateSessionAsync();
+        Assert.False(await verificationSession.IsProcessedAsync(inboxMessage));
+        Assert.Null(await persistence.LoadAsync<TestSagaData>("saga-create-rollback"));
+    }
+
+    [SqlServerFact]
+    public async Task SagaProcessing_RollsBackSavedSagaWhenOutboxInsertFails()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<TimeoutRequestSaga, TestSagaData>();
+        await persistence.CreateAsync(CreateSagaData("saga-save-rollback"));
+        var invoker = new SagaInvoker(registry, persistence);
+        var context = new RecordingMiniBusContext();
+        await using var session = await database.CreateSessionAsync();
+        var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+
+        await invoker.InvokeAsync(
+            new StartTimeoutSaga("saga-save-rollback", DateTimeOffset.UtcNow.AddMinutes(5)),
+            context,
+            EmptyServiceProvider.Instance,
+            persistence: sessionSagaPersistence,
+            requireInvocationPersistence: true);
+        await database.DropOutboxTableAsync();
+
+        await Assert.ThrowsAsync<SqlException>(() => session.CommitAsync(
+            database.CreateInboxMessage("message-saga-save-rollback"),
+            context.Operations));
+
+        var saga = await persistence.LoadAsync<TestSagaData>("saga-save-rollback");
+        Assert.NotNull(saga);
+        Assert.Equal("started", saga.Data.Status);
+    }
+
+    [SqlServerFact]
+    public async Task SagaProcessing_RollsBackCompletedSagaWhenCommitFails()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        await persistence.CreateAsync(CreateSagaData("saga-complete-rollback"));
+        var registry = new SagaRegistry();
+        registry.Register<CompletingSaga, TestSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+        var context = new RecordingMiniBusContext();
+        await using var session = await database.CreateSessionAsync();
+        var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+        var inboxMessage = database.CreateInboxMessage("message-saga-complete-rollback");
+
+        await invoker.InvokeAsync(
+            new CompleteSaga("saga-complete-rollback"),
+            context,
+            EmptyServiceProvider.Instance,
+            persistence: sessionSagaPersistence,
+            requireInvocationPersistence: true);
+        await database.DropOutboxTableAsync();
+
+        await Assert.ThrowsAsync<SqlException>(() => session.CommitAsync(
+            inboxMessage,
+            new[] { CreateOutboxOperation() }));
+
+        await using var verificationSession = await database.CreateSessionAsync();
+        var saga = await persistence.LoadAsync<TestSagaData>("saga-complete-rollback");
+        Assert.NotNull(saga);
+        Assert.False(saga.Data.IsCompleted);
+        Assert.False(await verificationSession.IsProcessedAsync(inboxMessage));
+    }
+
+    [SqlServerFact]
+    public async Task SagaProcessing_StaleVersionAbortsWithoutCommittingInbox()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var persistence = database.CreateSagaPersistence();
+        await persistence.CreateAsync(CreateSagaData("saga-stale-abort"));
+        var inboxMessage = database.CreateInboxMessage("message-saga-stale-abort");
+
+        {
+            await using var session = await database.CreateSessionAsync();
+            var sessionSagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+
+            Assert.True(await session.TryBeginAsync(inboxMessage));
+            var stale = await sessionSagaPersistence.LoadAsync<TestSagaData>("saga-stale-abort");
+            Assert.NotNull(stale);
+            var current = await persistence.LoadAsync<TestSagaData>("saga-stale-abort");
+            Assert.NotNull(current);
+            current.Data.Status = "external";
+            await persistence.SaveAsync(current.Data, current.Version);
+            stale.Data.Status = "stale";
+
+            await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+                sessionSagaPersistence.SaveAsync(stale.Data, stale.Version));
+        }
+
+        await using var verificationSession = await database.CreateSessionAsync();
+        Assert.False(await verificationSession.IsProcessedAsync(inboxMessage));
+        var saga = await persistence.LoadAsync<TestSagaData>("saga-stale-abort");
+        Assert.NotNull(saga);
+        Assert.Equal("external", saga.Data.Status);
     }
 
     [SqlServerFact]
@@ -690,6 +919,10 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
     private sealed record TestTimeout(string CorrelationId) : ISagaTimeout;
 
+    private sealed record CompleteSaga(string CorrelationId) : ICommand;
+
+    private sealed record StartAndCompleteSaga(string CorrelationId) : ICommand;
+
     public sealed class TestSagaData : ISagaData
     {
         public Guid Id { get; set; }
@@ -735,6 +968,40 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         public Task Handle(TestTimeout message, MiniBusContext context, CancellationToken cancellationToken)
         {
             Data.Status = "timed-out";
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CompletingSaga :
+        MiniBusSaga<TestSagaData>,
+        IHandleSagaMessages<CompleteSaga>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<TestSagaData> mapper)
+        {
+            mapper.Correlate<CompleteSaga>(message => message.CorrelationId);
+        }
+
+        public Task Handle(CompleteSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Status = "completed";
+            MarkAsComplete();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CompletingStartingSaga :
+        MiniBusSaga<TestSagaData>,
+        IHandleSagaMessages<StartAndCompleteSaga>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<TestSagaData> mapper)
+        {
+            mapper.StartsWith<StartAndCompleteSaga>(message => message.CorrelationId);
+        }
+
+        public Task Handle(StartAndCompleteSaga message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            Data.Status = "completed";
+            MarkAsComplete();
             return Task.CompletedTask;
         }
     }
@@ -897,6 +1164,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
     {
         private readonly MiniBusSqlPersistenceOptions _options;
         private readonly SqlOutboxOperationSerializer _operationSerializer;
+        private readonly SqlSagaDataSerializer _sagaDataSerializer;
 
         internal SqlServerTestDatabase(
             string connectionString,
@@ -916,6 +1184,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
             };
             configureOptions?.Invoke(_options);
             _operationSerializer = new SqlOutboxOperationSerializer(new JsonMessageSerializer());
+            _sagaDataSerializer = new SqlSagaDataSerializer(new JsonMessageSerializer());
         }
 
         public string ConnectionString { get; }
@@ -942,7 +1211,11 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
 
         public SqlMiniBusPersistenceSessionFactory CreateSessionFactory()
         {
-            return new SqlMiniBusPersistenceSessionFactory(_options, _operationSerializer);
+            return new SqlMiniBusPersistenceSessionFactory(
+                _options,
+                _operationSerializer,
+                _sagaDataSerializer,
+                new NoopSqlMiniBusOutboxDispatchSignal());
         }
 
         public ISqlMiniBusOutboxStore CreateOutboxStore()
@@ -962,7 +1235,7 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         {
             return new SqlSagaPersistence(
                 _options,
-                new SqlSagaDataSerializer(new JsonMessageSerializer()));
+                _sagaDataSerializer);
         }
 
         public MiniBusInboxMessage CreateInboxMessage(string messageId)

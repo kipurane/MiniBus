@@ -110,6 +110,12 @@ dotnet add package MiniBus.Analyzers
 
 At the moment these packages are prepared for local pack verification; publishing to NuGet is still a project workflow step, not something this repository does automatically.
 
+## Upgrade Notes
+
+The unreleased saga reliability work changes the public `ISagaPersistence` contract: `SaveAsync` and `CompleteAsync` now require a non-null `string version` token instead of accepting `string?`. Custom saga persistence providers must update their implementations to require the opaque token returned by `LoadAsync`, reject missing or malformed tokens with `ArgumentException`, and use `SagaPersistenceException` for stale or missing saga state. Direct callers that previously passed `null` for blind updates must load the saga first and pass the returned version token.
+
+This is a breaking API change. It should be released in a breaking release line: a clearly called-out preview release while MiniBus remains pre-1.0, or a major version if MiniBus has reached 1.0 or later.
+
 1. Define message contracts with `ICommand`, `IEvent`, or `IMessage`.
 2. Implement handlers with `IHandleMessages<TMessage>` and depend on `MiniBusContext`, not Azure SDK or Functions trigger types.
 3. Register `AddMiniBusAzureFunctions` with endpoint, recoverability, and saga options.
@@ -144,6 +150,8 @@ Run the scripts in `src/MiniBus.Persistence.Sql/Schema/` against the target data
 
 When SQL persistence is registered, MiniBus also registers SQL-backed `ISagaPersistence`. Saga data is stored in the configured saga table by saga data type and correlation id, with the serialized saga data, completion flag, completion timestamp, and SQL Server rowversion metadata. Saves and completions use optimistic concurrency; stale updates fail with `SagaPersistenceException` so normal message recoverability can retry or escalate the processing attempt.
 
+During SQL-backed message processing, saga state changes use the active SQL persistence session. The inbox record, captured outbox operations, and saga mutations commit or roll back as one SQL transaction. Duplicate inbox messages skip handlers and sagas, and a failed SQL commit leaves retry processing to observe the previous saga state.
+
 SQL saga persistence uses the configured MiniBus serializer for saga data. Keep saga data focused on workflow state rather than large document payloads, and treat data type renames as application-owned data migrations because stored rows are keyed by the saga data type identity.
 
 `MiniBus.Outbox` stores a deterministic outgoing message id for each newly captured operation. If an outbox dispatcher sends a message and crashes before marking the row as dispatched, a later replay uses the same outgoing message id so broker duplicate detection and downstream idempotency can recognize the retry where configured. The `002-outbox-outgoing-message-id.sql` migration backfills existing outbox rows from their row ids because the original capture sequence cannot be reconstructed reliably; drain or manually clean old pending rows before applying it if those legacy rows also require deterministic ids.
@@ -160,7 +168,7 @@ services.AddMiniBusSqlPersistence(options =>
 });
 ```
 
-The normal Azure Functions path lets MiniBus own the SQL transaction for inbox and outbox commits. Applications that need business data and MiniBus persistence in one SQL transaction can use the advanced `SqlMiniBusPersistenceSessionFactory.CreateForTransaction(DbConnection, DbTransaction)` API with an open connection and active transaction. In that mode MiniBus writes its inbox/outbox state inside the caller-owned transaction, but the application remains responsible for commit, rollback, and disposal.
+The normal Azure Functions path lets MiniBus own the SQL transaction for inbox, outbox, and saga-state commits. Applications that need business data and MiniBus persistence in one SQL transaction can use the advanced `SqlMiniBusPersistenceSessionFactory.CreateForTransaction(DbConnection, DbTransaction)` API with an open connection and active transaction. In that mode MiniBus writes its inbox/outbox state and session-bound saga state inside the caller-owned transaction, but the application remains responsible for commit, rollback, and disposal.
 
 Outbox dispatch is intentionally separate from handler execution. Manual dispatch is the default, using `SqlMiniBusOutboxDispatcher.DispatchPendingAsync` from an application-owned timer, worker, or external dispatcher process. `DispatchPendingAsync(CancellationToken)` dispatches one SQL batch; dispatcher workers can call `DispatchPendingBatchesAsync(maxBatches, cancellationToken)` when they want a bounded multi-batch drain. Single-process hosts that want automatic draining can opt in to the hosted dispatcher:
 

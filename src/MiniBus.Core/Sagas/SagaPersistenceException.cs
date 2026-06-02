@@ -6,4 +6,9 @@ public sealed class SagaPersistenceException : InvalidOperationException
         : base(message)
     {
     }
+
+    public SagaPersistenceException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

@@ -22,7 +22,7 @@ public sealed class UnconfiguredSagaPersistence : ISagaPersistence
 
     public Task SaveAsync<TData>(
         TData data,
-        string? version,
+        string version,
         CancellationToken cancellationToken = default)
         where TData : class, ISagaData, new()
     {
@@ -31,7 +31,7 @@ public sealed class UnconfiguredSagaPersistence : ISagaPersistence
 
     public Task CompleteAsync<TData>(
         TData data,
-        string? version,
+        string version,
         CancellationToken cancellationToken = default)
         where TData : class, ISagaData, new()
     {

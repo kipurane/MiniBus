@@ -27,6 +27,14 @@ internal sealed class SqlTableNames
             throw new ArgumentException("SQL identifiers cannot be empty.", nameof(value));
         }
 
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsControl(value[index]))
+            {
+                throw new ArgumentException("SQL identifiers cannot contain control characters.", nameof(value));
+            }
+        }
+
         return $"[{value.Replace("]", "]]", StringComparison.Ordinal)}]";
     }
 }

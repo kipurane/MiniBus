@@ -58,6 +58,38 @@ public sealed class SqlPersistenceTests
     }
 
     [Fact]
+    public void SqlTableNames_BracketQuotesAndEscapesConfiguredIdentifiers()
+    {
+        var tableNames = new SqlTableNames(new MiniBusSqlPersistenceOptions
+        {
+            SchemaName = "MiniBus]; DROP SCHEMA dbo;--",
+            InboxTableName = "Inbox.Name",
+            OutboxTableName = "Outbox]Name",
+            SagaTableName = "Sagas; DROP TABLE dbo.Sagas;--"
+        });
+
+        Assert.Equal("[MiniBus]]; DROP SCHEMA dbo;--].[Inbox.Name]", tableNames.Inbox);
+        Assert.Equal("[MiniBus]]; DROP SCHEMA dbo;--].[Outbox]]Name]", tableNames.Outbox);
+        Assert.Equal("[MiniBus]]; DROP SCHEMA dbo;--].[Sagas; DROP TABLE dbo.Sagas;--]", tableNames.Sagas);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("Inbox\nName")]
+    public void SqlTableNames_RejectsUnusableConfiguredIdentifiers(string identifier)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new SqlTableNames(new MiniBusSqlPersistenceOptions
+            {
+                SchemaName = "MiniBus",
+                InboxTableName = identifier
+            }));
+
+        Assert.Equal("value", exception.ParamName);
+    }
+
+    [Fact]
     public void AddMiniBusSqlPersistence_UsesExplicitConnectionFactoryWhenConnectionStringIsAlsoConfigured()
     {
         using var serviceProvider = new ServiceCollection()
@@ -276,7 +308,7 @@ public sealed class SqlPersistenceTests
             .AddSingleton<IMiniBusPersistenceSessionFactory>(serviceProvider =>
                 new SqlMiniBusPersistenceSessionFactory(
                     serviceProvider.GetRequiredService<MiniBusSqlPersistenceOptions>(),
-                    new SqlOutboxOperationSerializer(serviceProvider.GetRequiredService<IMessageSerializer>())))
+                    serviceProvider.GetRequiredService<IMessageSerializer>()))
             .AddSingleton<SqlMiniBusOutboxDispatcher>();
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
@@ -966,7 +998,7 @@ public sealed class SqlPersistenceTests
 
         public Task SaveAsync<TData>(
             TData data,
-            string? version,
+            string version,
             CancellationToken cancellationToken = default)
             where TData : class, ISagaData, new()
         {
@@ -975,7 +1007,7 @@ public sealed class SqlPersistenceTests
 
         public Task CompleteAsync<TData>(
             TData data,
-            string? version,
+            string version,
             CancellationToken cancellationToken = default)
             where TData : class, ISagaData, new()
         {

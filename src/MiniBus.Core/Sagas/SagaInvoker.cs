@@ -10,6 +10,7 @@ public sealed class SagaInvoker
         SagaCorrelationRule rule,
         object message,
         MiniBusContext context,
+        ISagaPersistence persistence,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
         Action<SagaInvocationDiagnostic>? sagaInvoked,
@@ -36,19 +37,34 @@ public sealed class SagaInvoker
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default,
         Action<SagaInvocationDiagnostic>? sagaInvoked = null,
-        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation = null)
+        Func<Type, string, Func<Task<SagaInvocationDiagnostic>>, Task<SagaInvocationDiagnostic>>? sagaInvocation = null,
+        ISagaPersistence? persistence = null,
+        bool requireInvocationPersistence = false)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(serviceProvider);
 
         var messageType = message.GetType();
-        foreach (var definition in _registry.GetDefinitionsForMessage(messageType))
+        var definitions = _registry.GetDefinitionsForMessage(messageType);
+        if (definitions.Count == 0)
+        {
+            return;
+        }
+
+        if (requireInvocationPersistence && persistence is null)
+        {
+            throw new InvalidOperationException("MiniBus saga processing requires the active persistence session to provide saga persistence so saga state participates in the same durable processing boundary as inbox and outbox state.");
+        }
+
+        var effectivePersistence = persistence ?? _persistence;
+        foreach (var definition in definitions)
         {
             await InvokeDefinitionAsync(
                     definition,
                     message,
                     context,
+                    effectivePersistence,
                     serviceProvider,
                     cancellationToken,
                     sagaInvoked,
@@ -61,6 +77,7 @@ public sealed class SagaInvoker
         SagaDefinition definition,
         object message,
         MiniBusContext context,
+        ISagaPersistence persistence,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
         Action<SagaInvocationDiagnostic>? sagaInvoked,
@@ -68,7 +85,7 @@ public sealed class SagaInvoker
     {
         var rule = ResolveRule(definition, message.GetType());
         var invoke = GetInvokeDelegate(definition.SagaType, definition.DataType, rule.MessageType);
-        return invoke(this, rule, message, context, serviceProvider, cancellationToken, sagaInvoked, sagaInvocation);
+        return invoke(this, rule, message, context, persistence, serviceProvider, cancellationToken, sagaInvoked, sagaInvocation);
     }
 
     private SagaInvocationDelegate GetInvokeDelegate(
@@ -93,6 +110,7 @@ public sealed class SagaInvoker
         SagaCorrelationRule rule,
         object message,
         MiniBusContext context,
+        ISagaPersistence persistence,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken,
         Action<SagaInvocationDiagnostic>? sagaInvoked,
@@ -111,7 +129,7 @@ public sealed class SagaInvoker
             throw new SagaMappingException($"Saga '{typeof(TSaga).FullName}' resolved an empty correlation id for message type '{typeof(TMessage).FullName}'.");
         }
 
-        var loaded = await _persistence
+        var loaded = await persistence
             .LoadAsync<TData>(correlationId, cancellationToken)
             .ConfigureAwait(false);
 
@@ -126,6 +144,7 @@ public sealed class SagaInvoker
             return;
         }
 
+        var loadedVersion = loaded?.Version;
         var data = loaded?.Data ?? new TData
         {
             Id = Guid.NewGuid(),
@@ -141,19 +160,22 @@ public sealed class SagaInvoker
 
             if (isNew)
             {
-                await _persistence.CreateAsync(data, cancellationToken).ConfigureAwait(false);
+                await persistence.CreateAsync(data, cancellationToken).ConfigureAwait(false);
+                return new SagaInvocationDiagnostic(typeof(TSaga), correlationId, data.IsCompleted);
+            }
+
+            if (string.IsNullOrWhiteSpace(loadedVersion))
+            {
+                throw new SagaPersistenceException($"Saga '{typeof(TSaga).FullName}' loaded saga data '{typeof(TData).FullName}' with correlation id '{correlationId}' without a version token.");
             }
 
             if (data.IsCompleted)
             {
-                await _persistence.CompleteAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
+                await persistence.CompleteAsync(data, loadedVersion, cancellationToken).ConfigureAwait(false);
                 return new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: true);
             }
 
-            if (!isNew)
-            {
-                await _persistence.SaveAsync(data, loaded?.Version, cancellationToken).ConfigureAwait(false);
-            }
+            await persistence.SaveAsync(data, loadedVersion, cancellationToken).ConfigureAwait(false);
 
             return new SagaInvocationDiagnostic(typeof(TSaga), correlationId, Completed: false);
         }

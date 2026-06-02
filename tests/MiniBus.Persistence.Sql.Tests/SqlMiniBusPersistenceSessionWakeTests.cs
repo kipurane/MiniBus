@@ -4,6 +4,7 @@ using System.Data.Common;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
+using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -15,6 +16,7 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
     [InlineData("connection")]
     [InlineData("tableNames")]
     [InlineData("operationSerializer")]
+    [InlineData("sagaDataSerializer")]
     [InlineData("dispatchSignal")]
     public void Constructor_ValidatesRequiredDependencies(string nullDependency)
     {
@@ -25,6 +27,7 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
                 ownsConnection: true,
                 nullDependency == "tableNames" ? null! : new SqlTableNames(new MiniBusSqlPersistenceOptions()),
                 nullDependency == "operationSerializer" ? null! : new SqlOutboxOperationSerializer(new RecordingSerializer()),
+                nullDependency == "sagaDataSerializer" ? null! : new SqlSagaDataSerializer(new RecordingSerializer()),
                 nullDependency == "dispatchSignal" ? null! : new RecordingDispatchSignal()));
 
         Assert.Equal(nullDependency, exception.ParamName);
@@ -165,7 +168,7 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
             {
                 ConnectionFactory = () => connection
             },
-            new SqlOutboxOperationSerializer(new RecordingSerializer()),
+            new RecordingSerializer(),
             signal);
 
         await using var session = await factory.CreateAsync();
@@ -174,6 +177,114 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
 
         Assert.Equal(1, signal.WakeCount);
         Assert.Equal(1, connection.LastTransaction?.CommitCount);
+    }
+
+    [Fact]
+    public async Task SharedSerializerFactoryConstructor_UsesProvidedSerializerForSagaData()
+    {
+        var connection = new RecordingDbConnection();
+        var serializer = new RecordingSerializer();
+        var factory = new SqlMiniBusPersistenceSessionFactory(
+            new MiniBusSqlPersistenceOptions
+            {
+                ConnectionFactory = () => connection
+            },
+            serializer);
+
+        await using var session = await factory.CreateAsync();
+        var sagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+
+        await sagaPersistence.CreateAsync(new TestSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1"
+        });
+
+        Assert.Contains(typeof(TestSagaData), serializer.SerializedTypes);
+    }
+
+    [Fact]
+    public async Task SessionSagaSaveAsync_ThrowsClearErrorWhenStoreResultIsMissing()
+    {
+        var connection = new RecordingDbConnection();
+        await using var session = CreateSession(
+            connection,
+            transaction: null,
+            ownsConnection: true,
+            new RecordingDispatchSignal());
+
+        var sagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            sagaPersistence.SaveAsync(new TestSagaData
+            {
+                Id = Guid.NewGuid(),
+                CorrelationId = "order-1"
+            }, "AQIDBAUGBwg="));
+
+        Assert.Contains("did not return a saga store result", exception.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task SessionSagaSaveAsync_PreservesInnerExceptionWhenStoreResultIsInvalid()
+    {
+        var connection = new RecordingDbConnection
+        {
+            StoreResultParameterValue = "not-an-int"
+        };
+        await using var session = CreateSession(
+            connection,
+            transaction: null,
+            ownsConnection: true,
+            new RecordingDispatchSignal());
+
+        var sagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            sagaPersistence.SaveAsync(new TestSagaData
+            {
+                Id = Guid.NewGuid(),
+                CorrelationId = "order-1"
+            }, "AQIDBAUGBwg="));
+
+        Assert.Contains("invalid saga store result", exception.Message, StringComparison.Ordinal);
+        Assert.IsType<FormatException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task SessionSagaCompleteAsync_DoesNotMutateCallerDataWhenStoreFails()
+    {
+        var connection = new RecordingDbConnection();
+        var sagaSerializer = new RecordingSerializer();
+        await using var session = new SqlMiniBusPersistenceSession(
+            connection,
+            transaction: null,
+            ownsConnection: true,
+            new SqlTableNames(new MiniBusSqlPersistenceOptions()),
+            new SqlOutboxOperationSerializer(new RecordingSerializer()),
+            new SqlSagaDataSerializer(sagaSerializer),
+            new RecordingDispatchSignal());
+        var sagaPersistence = Assert.IsAssignableFrom<ISagaPersistence>(session);
+        StaticAndIndexerSagaData.StaticValue = "before";
+        var data = new StaticAndIndexerSagaData
+        {
+            Id = Guid.NewGuid(),
+            CorrelationId = "order-1",
+            Status = "active",
+            IsCompleted = false
+        };
+        data["ignored"] = "indexer-value";
+
+        var exception = await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            sagaPersistence.CompleteAsync(data, "AQIDBAUGBwg="));
+
+        Assert.Contains("did not return a saga store result", exception.Message, StringComparison.Ordinal);
+        Assert.False(data.IsCompleted);
+        Assert.Equal("before", StaticAndIndexerSagaData.StaticValue);
+        var serializedData = Assert.IsType<StaticAndIndexerSagaData>(Assert.Single(sagaSerializer.SerializedMessages));
+        Assert.True(Assert.Single(sagaSerializer.SerializedCompletionStates));
+        Assert.True(serializedData.IsCompleted);
+        Assert.Equal("active", serializedData.Status);
+        Assert.NotSame(data, serializedData);
     }
 
     private static SqlMiniBusPersistenceSession CreateSession(
@@ -188,6 +299,7 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
             ownsConnection,
             new SqlTableNames(new MiniBusSqlPersistenceOptions()),
             new SqlOutboxOperationSerializer(new RecordingSerializer()),
+            new SqlSagaDataSerializer(new RecordingSerializer()),
             signal);
     }
 
@@ -215,6 +327,36 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
 
     private sealed record TestCommand(Guid Id) : ICommand;
 
+    private sealed class TestSagaData : ISagaData
+    {
+        public Guid Id { get; set; }
+
+        public string CorrelationId { get; set; } = string.Empty;
+
+        public bool IsCompleted { get; set; }
+    }
+
+    private sealed class StaticAndIndexerSagaData : ISagaData
+    {
+        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+        public static string StaticValue { get; set; } = string.Empty;
+
+        public Guid Id { get; set; }
+
+        public string CorrelationId { get; set; } = string.Empty;
+
+        public bool IsCompleted { get; set; }
+
+        public string Status { get; set; } = string.Empty;
+
+        public string this[string key]
+        {
+            get => _values[key];
+            set => _values[key] = value;
+        }
+    }
+
     private sealed class RecordingDispatchSignal : ISqlMiniBusOutboxDispatchSignal
     {
         public Exception? WakeException { get; init; }
@@ -239,8 +381,21 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
 
     private sealed class RecordingSerializer : IMessageSerializer
     {
+        public List<Type> SerializedTypes { get; } = new();
+
+        public List<object> SerializedMessages { get; } = new();
+
+        public List<bool> SerializedCompletionStates { get; } = new();
+
         public BinaryData Serialize(object message, Type messageType)
         {
+            SerializedTypes.Add(messageType);
+            SerializedMessages.Add(message);
+            if (message is ISagaData sagaData)
+            {
+                SerializedCompletionStates.Add(sagaData.IsCompleted);
+            }
+
             return BinaryData.FromString($"serialized:{messageType.Name}");
         }
 
@@ -253,6 +408,8 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
     private sealed class RecordingDbConnection : DbConnection
     {
         public Exception? CommitException { get; init; }
+
+        public object? StoreResultParameterValue { get; init; }
 
         public RecordingDbTransaction? LastTransaction { get; private set; }
 
@@ -400,6 +557,16 @@ public sealed class SqlMiniBusPersistenceSessionWakeTests
 
         public override int ExecuteNonQuery()
         {
+            foreach (var parameter in _parameters.OfType<DbParameter>())
+            {
+                if (parameter.Direction == ParameterDirection.Output
+                    && parameter.ParameterName == "@StoreResult"
+                    && _connection.StoreResultParameterValue is not null)
+                {
+                    parameter.Value = _connection.StoreResultParameterValue;
+                }
+            }
+
             return _connection.RecordExecuteNonQuery();
         }
 

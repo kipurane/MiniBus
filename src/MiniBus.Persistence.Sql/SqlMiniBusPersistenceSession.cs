@@ -7,16 +7,18 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MiniBus.Core.Headers;
 using MiniBus.Core.Persistence;
+using MiniBus.Core.Sagas;
 
 namespace MiniBus.Persistence.Sql;
 
-internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession
+internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistenceSession, ISagaPersistence
 {
     private readonly DbConnection _connection;
     private readonly bool _usesExternalTransaction;
     private readonly bool _ownsConnection;
     private readonly SqlTableNames _tableNames;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
+    private readonly SqlSagaPersistenceOperations _sagaOperations;
     private readonly ISqlMiniBusOutboxDispatchSignal _dispatchSignal;
     private readonly ILogger<SqlMiniBusPersistenceSession> _logger;
     private DbTransaction? _activeTransaction;
@@ -28,12 +30,14 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         bool ownsConnection,
         SqlTableNames tableNames,
         SqlOutboxOperationSerializer operationSerializer,
+        SqlSagaDataSerializer sagaDataSerializer,
         ISqlMiniBusOutboxDispatchSignal dispatchSignal,
         ILogger<SqlMiniBusPersistenceSession>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(tableNames);
         ArgumentNullException.ThrowIfNull(operationSerializer);
+        ArgumentNullException.ThrowIfNull(sagaDataSerializer);
         ArgumentNullException.ThrowIfNull(dispatchSignal);
 
         _connection = connection;
@@ -42,6 +46,7 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         _ownsConnection = ownsConnection;
         _tableNames = tableNames;
         _operationSerializer = operationSerializer;
+        _sagaOperations = new SqlSagaPersistenceOperations(sagaDataSerializer, tableNames);
         _dispatchSignal = dispatchSignal;
         _logger = logger ?? NullLogger<SqlMiniBusPersistenceSession>.Instance;
     }
@@ -145,6 +150,52 @@ internal sealed partial class SqlMiniBusPersistenceSession : IMiniBusPersistence
         {
             WakeDispatcherBestEffort();
         }
+    }
+
+    public async Task<SagaPersistenceRecord<TData>?> LoadAsync<TData>(
+        string correlationId,
+        CancellationToken cancellationToken = default)
+        where TData : class, ISagaData, new()
+    {
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
+        return await _sagaOperations
+            .LoadAsync<TData>(_connection, transaction, correlationId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task CreateAsync<TData>(
+        TData data,
+        CancellationToken cancellationToken = default)
+        where TData : class, ISagaData, new()
+    {
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await _sagaOperations
+            .CreateAsync(_connection, transaction, data, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task SaveAsync<TData>(
+        TData data,
+        string version,
+        CancellationToken cancellationToken = default)
+        where TData : class, ISagaData, new()
+    {
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await _sagaOperations
+            .SaveAsync(_connection, transaction, data, version, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task CompleteAsync<TData>(
+        TData data,
+        string version,
+        CancellationToken cancellationToken = default)
+        where TData : class, ISagaData, new()
+    {
+        var transaction = await EnsureTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await _sagaOperations
+            .CompleteAsync(_connection, transaction, data, version, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
