@@ -71,6 +71,7 @@ The processor keeps the Azure Functions-facing API small and delegates internal 
 - [`src/MiniBus.Templates`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Templates): `dotnet new` starters for the first Azure Functions + Azure Service Bus MiniBus project path.
 - [`samples/MiniBus.Samples.Billing.FunctionApp`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Billing.FunctionApp): emulator-runnable Billing Functions sample showing MiniBus registration, Service Bus trigger wrappers, handler code, routing, recoverability, saga setup, and an opt-in SQL-backed reliability path.
 - [`samples/MiniBus.Samples.Inventory.FunctionApp`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Inventory.FunctionApp): sibling Inventory endpoint for the emulator-backed Billing workflow.
+- [`samples/MiniBus.Samples.AppHost`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.AppHost): Aspire AppHost that composes the local Billing, Inventory, Billing outbox dispatcher, and Tooling Web projects with shared emulator, SQL, and Functions settings.
 - [`tests/MiniBus.AcceptanceTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AcceptanceTests) and `tests/*`: unit, integration, and acceptance tests for core behavior, transport, Functions processing, SQL persistence, Azure Storage persistence, and reference solution composition.
 
 ## Golden Path
@@ -130,6 +131,14 @@ This is a breaking API change. It should be released in a breaking release line:
 Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; see [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions) and [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators) for the wrapper shapes. [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers) provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
 
 The [`Billing sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Billing.FunctionApp) keeps the first emulator loop lightweight, then shows the SQL-backed reliability increment separately: SQL schema application, opt-in SQL persistence registration for inbox/outbox/saga state, and application-owned outbox draining through `SqlMiniBusOutboxDispatcher`. The [`Inventory sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Inventory.FunctionApp) is the sibling endpoint in the same local workflow.
+
+For the full local reference stack, [`MiniBus.Samples.AppHost`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.AppHost) uses Aspire to run SQL Server, Azurite, the Azure Service Bus emulator, the Billing Function App, Inventory Function App, Billing outbox dispatcher Function App, and `MiniBus.Tooling.Web` with one shared set of local settings. Stop any manually started compose stack first, then run:
+
+```bash
+ACCEPT_EULA=Y dotnet run --project samples/MiniBus.Samples.AppHost/MiniBus.Samples.AppHost.csproj
+```
+
+The AppHost runs the idempotent MiniBus SQL schema applier before the Billing Function App, Billing outbox dispatcher, and `MiniBus.Tooling.Web` start. After those resources are running, seed the workflow.
 
 ## SQL Persistence
 
@@ -305,7 +314,7 @@ minibus --connection-string "$MINIBUS_SQL" outbox drain --max-batches 5
 
 `MiniBus.Tooling.Web` exposes read-only API endpoints under `/api/tooling` for inbox, outbox, saga, and message/correlation timeline inspection. Configure SQL access through `MiniBus:Tooling:Sql:ConnectionString` and optionally `MiniBus:Tooling:Sql:SchemaName`.
 
-The web UI is also read-only: it lists operational records, shows selected record details, and displays best-effort timelines with unavailable sources called out explicitly. Tooling avoids dumping full message bodies, full saga data, or credentials by default. Aspire orchestration, Azure Service Bus inspection, DLQ resubmission, message replay, arbitrary console log scraping, Azure Monitor/Application Insights querying, and browser-triggered mutating actions remain deferred work.
+The web UI is also read-only: it lists operational records, shows selected record details, and displays best-effort timelines with unavailable sources called out explicitly. Tooling avoids dumping full message bodies, full saga data, or credentials by default. Aspire orchestration for the local reference stack now lives under `samples/MiniBus.Samples.AppHost`; Azure Service Bus inspection, DLQ resubmission, message replay, arbitrary console log scraping, Azure Monitor/Application Insights querying, and browser-triggered mutating actions remain deferred work.
 
 ## Development Workflow
 
@@ -323,4 +332,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, reference acceptance coverage, and SQL-backed CLI/web operational tooling in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling sources.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, Aspire local orchestration, reference acceptance coverage, and SQL-backed CLI/web operational tooling in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling sources.

@@ -32,6 +32,25 @@ Prerequisites:
 - Docker Desktop with Linux containers
 - Azure Functions Core Tools for `func start`
 
+For the full local reference stack, `samples/MiniBus.Samples.AppHost` composes the Billing Function App, Inventory Function App, Billing SQL outbox dispatcher Function App, `MiniBus.Tooling.Web`, SQL Server, Azurite, and the Azure Service Bus emulator with one shared set of local settings. Stop any manually started compose stack first so the AppHost can own the local emulator and SQL ports:
+
+```bash
+cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
+docker compose down
+cd ../../..
+ACCEPT_EULA=Y dotnet run --project samples/MiniBus.Samples.AppHost/MiniBus.Samples.AppHost.csproj
+```
+
+The AppHost runs the idempotent MiniBus SQL schema applier before the Billing Function App, Billing outbox dispatcher, and `MiniBus.Tooling.Web` start.
+
+After the AppHost is running, seed the workflow from another terminal:
+
+```bash
+./samples/MiniBus.Samples.Billing.FunctionApp/seed-local.sh
+```
+
+Use the Aspire dashboard to open `MiniBus.Tooling.Web` and inspect the same Billing SQL inbox, outbox, saga, and timeline state. The manual script path below remains supported when you want to run or debug each piece separately.
+
 The Billing sample runner starts the local infrastructure, waits for the Service Bus emulator to load the reference topology, checks the emulator and Azurite ports, then starts the Billing Function App in the foreground:
 
 ```bash

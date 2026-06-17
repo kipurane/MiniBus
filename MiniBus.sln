@@ -89,6 +89,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Tooling.Web", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Tooling.Web.Tests", "tests\MiniBus.Tooling.Web.Tests\MiniBus.Tooling.Web.Tests.csproj", "{F29D419C-EBBD-47B4-94CC-D33E5148378F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniBus.Samples.AppHost", "samples\MiniBus.Samples.AppHost\MiniBus.Samples.AppHost.csproj", "{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -471,6 +473,18 @@ Global
 		{F29D419C-EBBD-47B4-94CC-D33E5148378F}.Release|x64.Build.0 = Release|Any CPU
 		{F29D419C-EBBD-47B4-94CC-D33E5148378F}.Release|x86.ActiveCfg = Release|Any CPU
 		{F29D419C-EBBD-47B4-94CC-D33E5148378F}.Release|x86.Build.0 = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|x64.Build.0 = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Debug|x86.Build.0 = Debug|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|x64.ActiveCfg = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|x64.Build.0 = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|x86.ActiveCfg = Release|Any CPU
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -510,5 +524,6 @@ Global
 		{B72F8AAA-6505-49E8-9544-C30931A8AA6D} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
 		{568FB68E-FC62-4F4C-95E0-231EC8F9662C} = {5AB2733C-61E3-4E08-9A37-03783C1012D1}
 		{F29D419C-EBBD-47B4-94CC-D33E5148378F} = {A6C47CCC-6B68-4764-91C7-F4F9AF5F248B}
+		{8CC14141-2FFF-47DF-AC3E-3CE8C2AD2ABA} = {06CC6B02-890E-4302-866B-EF20BBFE700C}
 	EndGlobalSection
 EndGlobal

@@ -42,4 +42,4 @@ Common query parameters are `endpoint`, `messageId`, `correlationId`, `status`, 
 
 The first web slice does not expose outbox drain, retry, DLQ resubmit, message replay, destructive broker operations, or other state-changing actions. Full message bodies, full saga data, and credentials are not shown by default.
 
-Aspire local orchestration is planned as future composition work. Aspire is not a runtime dependency of this package.
+Aspire local orchestration for the reference stack lives under `samples/MiniBus.Samples.AppHost`. Aspire is not a runtime dependency of this package.

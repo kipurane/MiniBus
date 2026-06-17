@@ -1263,6 +1263,7 @@ Implemented baseline:
 - Bounded SQL outbox drain action wrapper over `SqlMiniBusOutboxDispatcher`.
 - First CLI command surface for local SQL troubleshooting with table and JSON output.
 - Packaged `MiniBus.Tooling.Web` surface with a read-only ASP.NET Core Minimal API and React/TypeScript UI for local list, detail, and timeline inspection.
+- Aspire AppHost for local sample orchestration across SQL Server, Azurite, the Azure Service Bus emulator, Billing, Inventory, the Billing outbox dispatcher, and `MiniBus.Tooling.Web` with shared emulator, SQL, and Functions settings.
 - Documentation for local SQL configuration, read-only inspection, explicit actions, redaction defaults, and deferred tooling surfaces.
 
 Planned direction:
@@ -1273,7 +1274,7 @@ Planned direction:
 - Keep tooling focused on observing and operating MiniBus runtime state; it must not become a second message-processing runtime.
 - Prefer provider modules for SQL persistence, Azure Service Bus, and observability backends.
 - Evolve `MiniBus.Tooling.Web` with additional read-only providers before adding mutating browser actions.
-- Prefer Aspire for local sample orchestration when running SQL Server, Service Bus emulator, Function Apps, dispatcher hosts, and `MiniBus.Tooling.Web` together.
+- Keep Aspire as the preferred local sample orchestration entry point when running SQL Server, Service Bus emulator, Function Apps, dispatcher hosts, and `MiniBus.Tooling.Web` together.
 - Keep Aspire as a development/sample orchestration concern rather than a runtime dependency of MiniBus packages.
 
 Conceptual shape:
@@ -1413,7 +1414,7 @@ The first tooling increment should harden a shared model before investing heavil
 - [x] Add a CLI console app over the shared tooling core for local troubleshooting, scripts, and CI diagnostics.
 - [x] Add `MiniBus.Tooling.Web` as a packaged ASP.NET Core Minimal API over the shared tooling core so the UI and future remote tooling use a stable HTTP boundary.
 - [x] Add a React and TypeScript UI served by `MiniBus.Tooling.Web`, focused first on read-only correlated message timelines, inbox/outbox state, saga state, and list/detail troubleshooting views.
-- [ ] Add Aspire-based local orchestration for the reference samples, SQL Server, Service Bus emulator, dispatcher host, and `MiniBus.Tooling.Web`.
+- [x] Add Aspire-based local orchestration for the reference samples, SQL Server, Service Bus emulator, dispatcher host, and `MiniBus.Tooling.Web`.
 - [x] Document local-only versus Azure-hosted tooling deployment guidance, including credential handling, read/write action safety, and redaction expectations.
 
 ---
