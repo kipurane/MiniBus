@@ -128,7 +128,7 @@ This is a breaking API change. It should be released in a breaking release line:
 9. Configure logging, `ActivitySource` listeners, or metrics exporters in the host application. MiniBus emits provider-neutral diagnostics and does not require a specific observability SDK.
 10. Unit test handlers and saga handlers directly with `MiniBus.Testing`; use processor, SQL, Azure Storage, or live integration tests only when that level of infrastructure is the thing under test.
 
-Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; see [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions) and [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators) for the wrapper shapes. [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers) provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration tests, automatic Azure infrastructure provisioning, and package publishing automation are future work.
+Manual Azure Functions wrappers remain supported and easy to debug. Source-generated wrappers are optional developer tooling for queue and topic/subscription triggers; see [`src/MiniBus.AzureFunctions`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions) and [`src/MiniBus.AzureFunctions.SourceGenerators`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.AzureFunctions.SourceGenerators) for the wrapper shapes. [`src/MiniBus.Analyzers`](https://github.com/kipurane/MiniBus/tree/main/src/MiniBus.Analyzers) provides optional compile-time guidance for high-signal MiniBus handler, message contract, routing, Azure Functions setup, and saga configuration mistakes; the first project template includes it by default, while manually assembled applications can opt in. Live Azure Service Bus integration coverage is available through an explicit opt-in against a caller-managed test namespace. Automatic production infrastructure provisioning and package publishing automation remain future work.
 
 The [`Billing sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Billing.FunctionApp) keeps the first emulator loop lightweight, then shows the SQL-backed reliability increment separately: SQL schema application, opt-in SQL persistence registration for inbox/outbox/saga state, and application-owned outbox draining through `SqlMiniBusOutboxDispatcher`. The [`Inventory sample`](https://github.com/kipurane/MiniBus/tree/main/samples/MiniBus.Samples.Inventory.FunctionApp) is the sibling endpoint in the same local workflow.
 
@@ -276,6 +276,24 @@ dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.cs
 
 When the environment variable is set, the integration tests use that database and create isolated `MiniBusTest_<guid>` schemas inside it. When it is not set, they try the Testcontainers/Docker path.
 
+### Live Azure Service Bus Integration Tests
+
+[`MiniBus.AzureServiceBus.IntegrationTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AzureServiceBus.IntegrationTests) verifies routed command sends, event publishing, scheduled delivery, metadata round-tripping, completion, abandon/redelivery, immediate retry, dead-letter diagnostics, and deterministic outbox replay identity against the production Azure Service Bus service.
+
+The suite requires a dedicated caller-managed namespace and a connection string with send, listen, and entity-management rights. It creates isolated entities prefixed with `minibus-live`, uses bounded waits, and performs best-effort cleanup. Azure namespace and messaging charges still apply.
+
+Enable the suite explicitly:
+
+```bash
+export MINIBUS_RUN_LIVE_AZURE_SERVICEBUS_TESTS=true
+export MINIBUS_AZURE_SERVICEBUS_CONNECTION_STRING='<dedicated test namespace connection string>'
+
+dotnet test tests/MiniBus.AzureServiceBus.IntegrationTests/MiniBus.AzureServiceBus.IntegrationTests.csproj \
+  --filter Category=LiveAzureServiceBus
+```
+
+Without both variables, live tests skip and the normal solution build does not contact Azure. Once enabled, authentication, authorization, network, setup, and broker timeout failures fail rather than skip. Connection strings and shared access keys are not written to test diagnostics. If a run is interrupted, use Azure Portal or Service Bus Explorer to remove stale `minibus-live` subscriptions, topics, and queues after confirming that no active run owns them. See the test project's README for the detailed cleanup and troubleshooting path.
+
 ### Reference Solution Acceptance Tests
 
 [`MiniBus.AcceptanceTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AcceptanceTests) provides a small high-level canary layer above the unit, adapter, transport, SQL, and Azure Storage suites.
@@ -332,4 +350,4 @@ openspec list
 
 ## Status
 
-This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, Aspire local orchestration, reference acceptance coverage, and SQL-backed CLI/web operational tooling in place. The next production-readiness work is distribution polish, live Azure integration coverage, and broader tooling sources.
+This is an early framework implementation with the core processing model, Azure Service Bus transport, Azure Functions adapter, recoverability, saga support, SQL inbox/outbox/saga persistence, Azure Storage claim-check/audit support, observability, testing helpers, source-generated Functions wrappers, Roslyn analyzers, the first project template, emulator-runnable samples, Aspire local orchestration, reference acceptance coverage, opt-in live Azure Service Bus integration coverage, and SQL-backed CLI/web operational tooling in place. The next production-readiness work is distribution polish and broader tooling sources.

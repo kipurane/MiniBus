@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines the package metadata, packaged README coverage, root golden-path documentation, and local verification expectations for early MiniBus distribution readiness.
-
 ## Requirements
 ### Requirement: Distributable projects define consistent NuGet metadata
 MiniBus SHALL provide consistent NuGet package metadata for each distributable project under `src/`.
@@ -52,9 +51,11 @@ MiniBus SHALL provide a concise root documentation path for starting an early Az
 - **WHEN** a developer reads the root README
 - **THEN** it points at the project-template entry path and still directs them through the current recommended setup flow for core contracts, handler registration, manual Azure Functions wrappers, Azure Service Bus routes, SQL persistence scripts, recoverability, outbox dispatch, observability, and testing
 
-#### Scenario: Deferred tooling is described
+#### Scenario: Optional tooling and infrastructure tests are described
 - **WHEN** a developer reads the setup documentation
-- **THEN** it clearly states that source-generated wrappers and Roslyn analyzers are optional tooling and that live Azure integration tests and automatic infrastructure provisioning remain future work
+- **THEN** it clearly states that source-generated wrappers and Roslyn analyzers are optional tooling
+- **AND** it describes live Azure Service Bus integration tests as an explicit opt-in path that requires a caller-managed test namespace
+- **AND** it states that automatic production infrastructure provisioning remains future work
 
 ### Requirement: Package readiness is locally verifiable
 MiniBus SHALL define local verification steps for package readiness before implementation is considered complete.
@@ -85,3 +86,4 @@ MiniBus SHALL define package metadata and package documentation for the Azure Fu
 #### Scenario: Runtime packages are packed
 - **WHEN** MiniBus runtime packages are packed
 - **THEN** they do not include Roslyn source generator implementation dependencies as runtime dependencies
+

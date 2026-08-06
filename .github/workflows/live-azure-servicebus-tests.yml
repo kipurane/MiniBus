@@ -1,0 +1,42 @@
+name: Live Azure Service Bus tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-azure-servicebus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: live-azure-servicebus-tests
+    env:
+      MINIBUS_RUN_LIVE_AZURE_SERVICEBUS_TESTS: "true"
+      MINIBUS_AZURE_SERVICEBUS_CONNECTION_STRING: ${{ secrets.MINIBUS_AZURE_SERVICEBUS_CONNECTION_STRING }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Require protected live-test secret
+        shell: bash
+        run: |
+          if [ -z "${MINIBUS_AZURE_SERVICEBUS_CONNECTION_STRING}" ]; then
+            echo "The protected live Azure Service Bus test secret is not configured."
+            exit 1
+          fi
+
+      - name: Restore live test project
+        run: dotnet restore tests/MiniBus.AzureServiceBus.IntegrationTests/MiniBus.AzureServiceBus.IntegrationTests.csproj
+
+      - name: Run live Azure Service Bus tests
+        run: >-
+          dotnet test
+          tests/MiniBus.AzureServiceBus.IntegrationTests/MiniBus.AzureServiceBus.IntegrationTests.csproj
+          --no-restore
+          --filter Category=LiveAzureServiceBus
+          --logger "console;verbosity=normal"

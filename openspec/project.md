@@ -1397,7 +1397,7 @@ The next sample increment should prefer a local Azure Service Bus emulator path 
 - [x] Expand the billing sample into a fuller locally runnable reference app against the Azure Service Bus emulator once the remaining core production features are stable.
 - [x] Add an inventory or multi-endpoint sample on top of the emulator-backed reference workflow.
 - [x] Add the timer-triggered SQL outbox dispatcher sample.
-- [ ] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
+- [x] Add live Azure Service Bus integration tests once the emulator-backed sample workflow is stable and reusable Azure infrastructure exists.
 - [x] Add documentation for configuration, routing, recoverability, sagas, SQL persistence, outbox behavior, observability, and testing.
 - [x] Add a `MiniBus.Testing` package with `TestableMiniBusContext`, fake bus helpers, and handler test harnesses.
 
