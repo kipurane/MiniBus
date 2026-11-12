@@ -1,29 +1,40 @@
 using MiniBus.AzureServiceBus.TransportMessageMapping;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.AzureFunctions.Processing.Pipeline;
 
 internal sealed class MessageTypeResolutionBehavior : IMiniBusProcessingBehavior
 {
+    private readonly MiniBusMessageIdentityRegistry _messageIdentities;
+
+    public MessageTypeResolutionBehavior(MiniBusMessageIdentityRegistry? messageIdentities = null)
+    {
+        _messageIdentities = messageIdentities ?? new MiniBusMessageIdentityRegistry();
+    }
+
     public Task InvokeAsync(
         MiniBusProcessingContext context,
         MiniBusProcessingDelegate next,
         CancellationToken cancellationToken)
     {
-        context.MessageType = ResolveMessageType(context.Headers);
+        context.MessageType = ResolveMessageType(context.Headers, _messageIdentities);
         return next(context, cancellationToken);
     }
 
-    public static Type ResolveMessageType(IReadOnlyDictionary<string, string> headers)
+    public static Type ResolveMessageType(
+        IReadOnlyDictionary<string, string> headers,
+        MiniBusMessageIdentityRegistry? messageIdentities = null)
     {
         var messageTypeName = GetMessageTypeName(headers);
-        var messageType = Type.GetType(messageTypeName, throwOnError: false);
-
-        if (messageType is null)
+        try
         {
-            throw new MiniBusMessageTypeResolutionException($"MiniBus message type '{messageTypeName}' could not be resolved.");
+            return (messageIdentities ?? new MiniBusMessageIdentityRegistry()).Resolve(messageTypeName);
         }
-
-        return messageType;
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            throw new MiniBusMessageTypeResolutionException(
+                $"MiniBus message type '{messageTypeName}' could not be resolved.", exception);
+        }
     }
 
     private static string GetMessageTypeName(IReadOnlyDictionary<string, string> headers)

@@ -2,6 +2,11 @@ using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text;
 using Azure.Storage.Blobs;
+using MiniBus.Core.ClaimCheck;
+using MiniBus.Core.Contracts;
+using MiniBus.Core.Headers;
+using MiniBus.Core.Identity;
+using MiniBus.Core.Serialization;
 using Testcontainers.Azurite;
 using Xunit;
 
@@ -18,6 +23,33 @@ public sealed class AzureStoragePayloadStoreIntegrationTests :
     {
         _fixture = fixture;
     }
+
+    [AzureStorageFact]
+    public async Task ClaimCheck_StableIdentityAndAliasRoundTripThroughBlobStorage()
+    {
+        var store = (IMiniBusClaimCheckPayloadStore)await _fixture.CreateStoreAsync();
+        var identities = new MiniBusMessageIdentityRegistry().Map<StablePayload>("payload.stable", "payload.old");
+        var serializer = new SystemTextJsonMessageSerializer();
+        var payload = new StablePayload("blob-backed");
+        var inline = await new MiniBusClaimCheckMessageTransformer(serializer, messageIdentities: identities)
+            .TransformAsync(payload, typeof(StablePayload));
+        var checkedMessage = await new MiniBusClaimCheckMessageTransformer(
+                serializer, new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 1 }, store, identities)
+            .TransformAsync(payload, typeof(StablePayload));
+
+        Assert.False(inline.IsClaimChecked);
+        Assert.True(checkedMessage.IsClaimChecked);
+        Assert.Equal("payload.stable", inline.Headers[MiniBusHeaderNames.MessageType]);
+        Assert.Equal(inline.Headers[MiniBusHeaderNames.MessageType], checkedMessage.Headers[MiniBusHeaderNames.MessageType]);
+        var body = await store.ReadAsync(MiniBusClaimCheckReferenceReader.Read(checkedMessage.Headers));
+        foreach (var identity in new[] { "payload.stable", "payload.old" })
+        {
+            Assert.Equal(payload, serializer.Deserialize(body, identities.Resolve(identity)));
+        }
+        Assert.Throws<InvalidOperationException>(() => identities.Resolve("payload.unknown"));
+    }
+
+    public sealed record StablePayload(string Value) : ICommand;
 
     [AzureStorageFact]
     public async Task PayloadStore_WritesAndReadsPayload()

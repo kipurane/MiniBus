@@ -22,6 +22,8 @@ public static class MiniBusConfiguration
         services.AddMiniBusAzureFunctions(options =>
         {
             options.EndpointName = "Starter";
+            options.MessageIdentities.Map<SubmitOrder>("starter.submit-order");
+            options.MessageIdentities.Map<OrderSubmitted>("starter.order-submitted");
             options.Recoverability.ImmediateRetries = 3;
             options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));
             options.Recoverability.DelayedRetries.Add(TimeSpan.FromMinutes(1));

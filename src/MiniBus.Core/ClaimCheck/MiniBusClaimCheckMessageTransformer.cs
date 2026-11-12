@@ -1,5 +1,6 @@
 using System.Globalization;
 using MiniBus.Core.Headers;
+using MiniBus.Core.Identity;
 using MiniBus.Core.Serialization;
 
 namespace MiniBus.Core.ClaimCheck;
@@ -11,15 +12,18 @@ public sealed class MiniBusClaimCheckMessageTransformer
     private readonly IMessageSerializer _serializer;
     private readonly MiniBusClaimCheckOptions _options;
     private readonly IMiniBusClaimCheckPayloadStore? _payloadStore;
+    private readonly MiniBusMessageIdentityRegistry _messageIdentities;
 
     public MiniBusClaimCheckMessageTransformer(
         IMessageSerializer serializer,
         MiniBusClaimCheckOptions? options = null,
-        IMiniBusClaimCheckPayloadStore? payloadStore = null)
+        IMiniBusClaimCheckPayloadStore? payloadStore = null,
+        MiniBusMessageIdentityRegistry? messageIdentities = null)
     {
         _serializer = serializer;
         _options = options ?? MiniBusClaimCheckOptions.Disabled;
         _payloadStore = payloadStore;
+        _messageIdentities = messageIdentities ?? new MiniBusMessageIdentityRegistry();
     }
 
     public async Task<MiniBusOutgoingMessage> TransformAsync(
@@ -36,7 +40,7 @@ public sealed class MiniBusClaimCheckMessageTransformer
             throw new ArgumentException($"Message instance must be assignable to '{messageType.FullName}'.", nameof(message));
         }
 
-        var mappedHeaders = CreateHeaders(messageType, headers);
+        var mappedHeaders = CreateHeaders(messageType, headers, _messageIdentities);
         var body = _serializer.Serialize(message, messageType);
         _options.Validate();
 
@@ -74,15 +78,16 @@ public sealed class MiniBusClaimCheckMessageTransformer
 
     public static Dictionary<string, string> CreateHeaders(
         Type messageType,
-        IReadOnlyDictionary<string, string>? headers)
+        IReadOnlyDictionary<string, string>? headers,
+        MiniBusMessageIdentityRegistry? messageIdentities = null)
     {
         var mappedHeaders = headers is null
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(headers, StringComparer.Ordinal);
 
-        var messageTypeName = messageType.AssemblyQualifiedName ?? messageType.FullName ?? messageType.Name;
-        mappedHeaders.TryAdd(MiniBusHeaderNames.MessageType, messageTypeName);
-        mappedHeaders.TryAdd(MiniBusHeaderNames.EnclosedMessageTypes, messageTypeName);
+        var messageTypeName = (messageIdentities ?? new MiniBusMessageIdentityRegistry()).GetIdentity(messageType);
+        mappedHeaders[MiniBusHeaderNames.MessageType] = messageTypeName;
+        mappedHeaders[MiniBusHeaderNames.EnclosedMessageTypes] = messageTypeName;
         mappedHeaders.TryAdd(MiniBusHeaderNames.MessageId, Guid.NewGuid().ToString("N"));
         mappedHeaders.TryAdd(MiniBusHeaderNames.ContentType, DefaultContentType);
 

@@ -518,7 +518,8 @@ public sealed class SqlPersistenceTests
         var serializer = new SqlOutboxOperationSerializer(
             new RecordingSerializer(),
             new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 3 },
-            store);
+            store,
+            new MiniBus.Core.Identity.MiniBusMessageIdentityRegistry().Map<TestCommand>("billing.command"));
         var operation = new MiniBusOutboxOperation(
             MiniBusOutboxOperationKind.Send,
             new TestCommand(Guid.NewGuid()),
@@ -544,6 +545,8 @@ public sealed class SqlPersistenceTests
         Assert.Equal("serialized:TestCommand", Assert.Single(store.Writes).Payload.ToString());
         Assert.NotEqual("serialized:TestCommand", stored.Body.ToString());
         Assert.Equal(bool.TrueString, stored.Headers[MiniBusClaimCheckHeaderNames.Enabled]);
+        Assert.Equal("billing.command", serialized.MessageType);
+        Assert.Equal("billing.command", stored.Headers[MiniBusHeaderNames.MessageType]);
         Assert.Equal(MiniBusClaimCheckProviderNames.AzureBlobStorage, stored.Headers[MiniBusClaimCheckHeaderNames.Provider]);
         Assert.Equal("payloads/payload-1.bin", stored.Headers[MiniBusClaimCheckHeaderNames.BlobName]);
         Assert.Equal("correlation-1", stored.Headers[MiniBusHeaderNames.CorrelationId]);

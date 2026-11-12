@@ -2,6 +2,7 @@ using System.Text.Json;
 using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Serialization;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.Persistence.Sql;
 
@@ -12,18 +13,22 @@ public sealed class SqlOutboxOperationSerializer
     private readonly IMessageSerializer _messageSerializer;
     private readonly MiniBusClaimCheckOptions _claimCheckOptions;
     private readonly MiniBusClaimCheckMessageTransformer _transformer;
+    private readonly MiniBusMessageIdentityRegistry _messageIdentities;
 
     public SqlOutboxOperationSerializer(
         IMessageSerializer messageSerializer,
         MiniBusClaimCheckOptions? claimCheckOptions = null,
-        IMiniBusClaimCheckPayloadStore? claimCheckPayloadStore = null)
+        IMiniBusClaimCheckPayloadStore? claimCheckPayloadStore = null,
+        MiniBusMessageIdentityRegistry? messageIdentities = null)
     {
         _messageSerializer = messageSerializer;
         _claimCheckOptions = claimCheckOptions ?? MiniBusClaimCheckOptions.Disabled;
+        _messageIdentities = messageIdentities ?? new MiniBusMessageIdentityRegistry();
         _transformer = new MiniBusClaimCheckMessageTransformer(
             messageSerializer,
             _claimCheckOptions,
-            claimCheckPayloadStore);
+            claimCheckPayloadStore,
+            _messageIdentities);
     }
 
     public SerializedOutboxOperation Serialize(MiniBusOutboxOperation operation)
@@ -36,11 +41,12 @@ public sealed class SqlOutboxOperationSerializer
                 "MiniBus SQL outbox operation serialization requires SerializeAsync when claim-check behavior is enabled.");
         }
 
-        var headers = MiniBusClaimCheckMessageTransformer.CreateHeaders(operation.MessageType, operation.Headers);
+        var headers = MiniBusClaimCheckMessageTransformer.CreateHeaders(operation.MessageType, operation.Headers, _messageIdentities);
+        var messageIdentity = _messageIdentities.GetIdentity(operation.MessageType);
 
         return new SerializedOutboxOperation(
             operation.Kind.ToString(),
-            operation.MessageType.AssemblyQualifiedName ?? operation.MessageType.FullName ?? operation.MessageType.Name,
+            messageIdentity,
             _messageSerializer.Serialize(operation.Message, operation.MessageType).ToArray(),
             SerializeHeaders(headers),
             operation.DueTime);
@@ -58,7 +64,7 @@ public sealed class SqlOutboxOperationSerializer
 
         return new SerializedOutboxOperation(
             operation.Kind.ToString(),
-            operation.MessageType.AssemblyQualifiedName ?? operation.MessageType.FullName ?? operation.MessageType.Name,
+            _messageIdentities.GetIdentity(operation.MessageType),
             outgoingMessage.Body.ToArray(),
             SerializeHeaders(outgoingMessage.Headers),
             operation.DueTime);
@@ -74,8 +80,15 @@ public sealed class SqlOutboxOperationSerializer
         DateTimeOffset? dueTime,
         int attemptCount)
     {
-        var messageType = Type.GetType(messageTypeName, throwOnError: false)
-            ?? throw new InvalidOperationException($"MiniBus outbox message type '{messageTypeName}' could not be resolved.");
+        Type messageType;
+        try
+        {
+            messageType = _messageIdentities.Resolve(messageTypeName);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            throw new InvalidOperationException($"MiniBus outbox message type '{messageTypeName}' could not be resolved.", exception);
+        }
 
         return new MiniBusOutboxStoredOperation(
             id,

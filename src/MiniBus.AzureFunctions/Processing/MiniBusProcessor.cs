@@ -10,6 +10,7 @@ using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
+using MiniBus.Core.Identity;
 using System.Runtime.ExceptionServices;
 
 namespace MiniBus.AzureFunctions.Processing;
@@ -55,6 +56,7 @@ public sealed class MiniBusProcessor
             _processingLogger,
             _processingTracer,
             _processingMetrics,
+            _options.MessageIdentities,
             sagaInvoker);
         _delayedRetryScheduler = new DelayedRetryScheduler(serviceProvider);
     }
@@ -234,12 +236,13 @@ public sealed class MiniBusProcessor
         MiniBusProcessingLogger processingLogger,
         MiniBusProcessingTracer processingTracer,
         MiniBusProcessingMetrics processingMetrics,
+        MiniBusMessageIdentityRegistry messageIdentities,
         SagaInvoker? sagaInvoker)
     {
         return new MiniBusProcessingPipeline(new IMiniBusProcessingBehavior[]
         {
             new PersistenceBehavior(serviceProvider, processingLogger, processingTracer),
-            new MessageTypeResolutionBehavior(),
+            new MessageTypeResolutionBehavior(messageIdentities),
             new ClaimCheckPayloadResolutionBehavior(serviceProvider),
             new MessageDeserializationBehavior(serializer),
             new HandlerContextBehavior(serviceProvider),

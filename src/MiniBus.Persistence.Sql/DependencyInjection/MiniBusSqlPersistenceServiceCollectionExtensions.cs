@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.Persistence.Sql.DependencyInjection;
 
@@ -44,6 +45,7 @@ public static class MiniBusSqlPersistenceServiceCollectionExtensions
         ApplyConnectionStringFactory(options);
 
         services.AddSingleton(options);
+        services.TryAddSingleton<MiniBusMessageIdentityRegistry>();
         services.AddSingleton<SqlOutboxOperationSerializer>();
         services.AddSingleton<SqlSagaDataSerializer>();
         services.AddSingleton<SqlMiniBusOutboxMetrics>();

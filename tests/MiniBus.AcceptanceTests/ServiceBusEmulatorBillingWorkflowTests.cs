@@ -4,7 +4,12 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using MiniBus.AzureFunctions.Processing;
+using MiniBus.AzureServiceBus.Dispatching;
+using MiniBus.AzureServiceBus.Recoverability;
+using MiniBus.AzureServiceBus.Routing;
+using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Headers;
+using MiniBus.Core.Identity;
 using MiniBus.Core.Serialization;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
@@ -12,6 +17,7 @@ using MiniBus.Samples.Billing.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp;
 using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 using Xunit.Sdk;
+using MiniBusHeaderNames = MiniBus.Core.Headers.MiniBusHeaderNames;
 
 namespace MiniBus.AcceptanceTests;
 
@@ -35,6 +41,62 @@ public sealed class ServiceBusEmulatorBillingWorkflowTests
         "MiniBus.Samples.Billing.FunctionApp.dll",
         "MiniBus.Samples.Inventory.FunctionApp.dll"
     ];
+
+    [ServiceBusEmulatorFact]
+    public async Task StableIdentity_RoundTripsThroughEmulatorAndDelayedRetry()
+    {
+        await SkipWhenEmulatorIsUnavailableAsync();
+        await SkipWhenSampleFunctionHostsAreRunningAsync();
+
+        var connectionString = GetConnectionString();
+        var correlationId = $"stable-identity-{Guid.NewGuid():N}";
+        var identities = new MiniBusMessageIdentityRegistry()
+            .Map<CreateInvoice>("billing.create-invoice", "legacy.invoice");
+        var routes = new AzureServiceBusTransportRoutes();
+        routes.MapCommand<CreateInvoice>(BillingTopology.InputQueue);
+        await using var client = new ServiceBusClient(connectionString);
+        await using var sender = new AzureServiceBusSender(client);
+        await using var receiver = client.CreateReceiver(BillingTopology.InputQueue);
+        var dispatcher = new AzureServiceBusTransportDispatcher(
+            routes,
+            new AzureServiceBusMessageFactory(new SystemTextJsonMessageSerializer(), messageIdentities: identities),
+            sender);
+        var scheduler = new AzureServiceBusDelayedRetryScheduler(routes, sender);
+        var command = new CreateInvoice($"invoice-{Guid.NewGuid():N}", "customer", 42m);
+
+        await dispatcher.SendAsync(command, new Dictionary<string, string>
+        {
+            [MiniBusHeaderNames.CorrelationId] = correlationId
+        });
+
+        var original = await ReceiveBillingCommandRequiredAsync(client, receiver, "stable command", correlationId);
+        try
+        {
+            Assert.Equal("billing.create-invoice", original.Subject);
+            Assert.Equal("billing.create-invoice", original.ApplicationProperties[MiniBusHeaderNames.MessageType]);
+            Assert.Equal("billing.create-invoice", original.ApplicationProperties[MiniBusHeaderNames.EnclosedMessageTypes]);
+            Assert.Equal(command, Deserialize<CreateInvoice>(original));
+            var headers = AzureServiceBusHeaderMapper.ReadHeaders(original);
+            await scheduler.ScheduleRetryAsync(original, typeof(CreateInvoice), DateTimeOffset.UtcNow.AddSeconds(1), headers);
+        }
+        finally
+        {
+            await receiver.CompleteMessageAsync(original);
+        }
+
+        var retry = await ReceiveRequiredAsync(receiver, "stable delayed retry", correlationId);
+        try
+        {
+            Assert.Equal("billing.create-invoice", retry.Subject);
+            Assert.Equal("billing.create-invoice", retry.ApplicationProperties[MiniBusHeaderNames.MessageType]);
+            Assert.Equal("billing.create-invoice", retry.ApplicationProperties[MiniBusHeaderNames.EnclosedMessageTypes]);
+            Assert.Equal(command, Deserialize<CreateInvoice>(retry));
+        }
+        finally
+        {
+            await receiver.CompleteMessageAsync(retry);
+        }
+    }
 
     [ServiceBusEmulatorFact]
     public async Task BillingWorkflow_DispatchesThroughServiceBusEmulator()

@@ -29,14 +29,14 @@ The default workflow uses the Azure Service Bus emulator configuration under `se
 
 Prerequisites:
 
-- Docker Desktop with Linux containers
+- Podman with Linux containers and a Compose provider such as `podman-compose`
 - Azure Functions Core Tools for `func start`
 
 For the full local reference stack, `samples/MiniBus.Samples.AppHost` composes the Billing Function App, Inventory Function App, Billing SQL outbox dispatcher Function App, `MiniBus.Tooling.Web`, SQL Server, Azurite, and the Azure Service Bus emulator with one shared set of local settings. Stop any manually started compose stack first so the AppHost can own the local emulator and SQL ports:
 
 ```bash
 cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
-docker compose down
+podman compose down
 cd ../../..
 ACCEPT_EULA=Y dotnet run --project samples/MiniBus.Samples.AppHost/MiniBus.Samples.AppHost.csproj
 ```
@@ -61,13 +61,13 @@ The script requires `ACCEPT_EULA=Y` so the Azure Service Bus emulator and SQL Se
 
 ```bash
 cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
-ACCEPT_EULA=Y docker compose up -d
+ACCEPT_EULA=Y podman compose up -d
 ```
 
 Wait until the emulator has loaded `Config.json` and created the reference entities:
 
 ```bash
-docker compose logs -f emulator
+podman compose logs -f emulator
 ```
 
 Continue after the emulator logs `User defined entities created for SB Emulator` and `Emulator Service is Successfully Up!`. If the Functions host was already polling `billing-queue` before those messages appeared, stop it and run `func start` again after the emulator is ready.
@@ -150,7 +150,7 @@ The sample compose file exposes its SQL Server dependency on `localhost:14333` f
 
    ```bash
    cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
-   ACCEPT_EULA=Y docker compose up -d --force-recreate
+   ACCEPT_EULA=Y podman compose up -d --force-recreate
    ```
 
    The SQL-backed workflow exposes the emulator SQL dependency on `localhost:14333`. Recreate the sample stack when this compose shape is first applied or after its `mssql` container is recreated; the Service Bus emulator initializes its own gateway and message-container databases in that SQL service during startup, and Azurite is needed by the local Functions host.

@@ -1,5 +1,7 @@
 # MiniBus.Core
 
+Stable message identities are configured with `MiniBusMessageIdentityRegistry.Map<TMessage>(primary, aliases)`. Share the same mappings across endpoints and independent SQL dispatchers. See the root README for rollout and compatibility guidance.
+
 `MiniBus.Core` contains the handler-facing contracts and framework abstractions used by all MiniBus packages.
 
 It includes:

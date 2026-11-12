@@ -1,5 +1,7 @@
 # MiniBus.AzureServiceBus
 
+The message factory uses the registered `MiniBusMessageIdentityRegistry` for wire identities. Pass the shared registry explicitly when constructing transport services outside dependency injection. See the root README for stable identity rollout guidance.
+
 `MiniBus.AzureServiceBus` provides Azure Service Bus transport support for MiniBus.
 
 It includes:

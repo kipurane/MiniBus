@@ -25,6 +25,44 @@ namespace MiniBus.AzureFunctions.Tests;
 
 public sealed class MiniBusProcessorTests
 {
+    [Fact]
+    public async Task ProcessAsync_UnknownIdentityDeadLettersWithoutInvokingHandler()
+    {
+        var recorder = new HandlerRecorder();
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        });
+        var message = CreateMessage(new Dictionary<string, object> { [MiniBusHeaderNames.MessageType] = "unknown.identity" });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Same(message, actions.DeadLetteredMessage);
+        Assert.Empty(recorder.Invocations);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_IncompatibleBodyForStableIdentityDeadLetters()
+    {
+        var recorder = new HandlerRecorder();
+        var processor = CreateProcessor(new SystemTextJsonMessageSerializer(), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+        }, options => options.MessageIdentities.Map<TestCommand>("command.stable"));
+        var message = ServiceBusModelFactory.ServiceBusReceivedMessage(
+            body: BinaryData.FromString("{invalid json"),
+            messageId: "bad-body",
+            properties: new Dictionary<string, object> { [MiniBusHeaderNames.MessageType] = "command.stable" });
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(message, actions);
+
+        Assert.Same(message, actions.DeadLetteredMessage);
+        Assert.Empty(recorder.Invocations);
+    }
     private static readonly TimeSpan DelayedRetryAssertionTolerance = TimeSpan.FromSeconds(2);
 
     [Fact]
@@ -1028,6 +1066,47 @@ public sealed class MiniBusProcessorTests
         Assert.Null(actions.DeadLetteredMessage);
     }
 
+    [Theory]
+    [InlineData("payload.stable")]
+    [InlineData("payload.old")]
+    public async Task ProcessAsync_ClaimCheckedStableIdentityOrAliasInvokesHandler(string identity)
+    {
+        var recorder = new HandlerRecorder();
+        var store = new RecordingClaimCheckPayloadStore { Payload = BinaryData.FromString("{}") };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton(recorder);
+            services.AddSingleton<IHandleMessages<TestCommand>, RecordingCommandHandler>();
+            services.AddSingleton<IMiniBusClaimCheckPayloadStore>(store);
+        }, options => options.MessageIdentities.Map<TestCommand>("payload.stable", "payload.old"));
+        var properties = CreateClaimCheckProperties();
+        properties[MiniBusHeaderNames.MessageType] = identity;
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(CreateMessage(properties), actions);
+
+        Assert.Single(recorder.Invocations);
+        Assert.Single(store.Reads);
+        Assert.NotNull(actions.CompletedMessage);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_UnknownClaimCheckedIdentityDeadLettersBeforeReadingBlob()
+    {
+        var store = new RecordingClaimCheckPayloadStore();
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+            services.AddSingleton<IMiniBusClaimCheckPayloadStore>(store),
+            options => options.MessageIdentities.Map<TestCommand>("payload.stable"));
+        var properties = CreateClaimCheckProperties();
+        properties[MiniBusHeaderNames.MessageType] = "payload.unknown";
+        var actions = new RecordingMessageActions();
+
+        await processor.ProcessAsync(CreateMessage(properties), actions);
+
+        Assert.NotNull(actions.DeadLetteredMessage);
+        Assert.Empty(store.Reads);
+    }
+
     [Fact]
     public async Task ProcessAsync_DeadLettersWhenClaimCheckPayloadIsMissing()
     {
@@ -1162,11 +1241,12 @@ public sealed class MiniBusProcessorTests
             {
                 options.Recoverability.ImmediateRetries = 1;
                 options.Recoverability.DelayedRetries.Add(delayedRetryDelay);
+                options.MessageIdentities.Map<TestCommand>("test.command");
             });
         var expectedDueTime = DateTimeOffset.UtcNow.Add(delayedRetryDelay);
         var message = CreateMessage(new Dictionary<string, object>
         {
-            [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!,
+            [MiniBusHeaderNames.MessageType] = "test.command",
             [MiniBusHeaderNames.MessageId] = "message-1",
             [MiniBusHeaderNames.CorrelationId] = "correlation-1"
         });
@@ -1178,6 +1258,7 @@ public sealed class MiniBusProcessorTests
         Assert.Same(message, actions.CompletedMessage);
         Assert.Null(actions.DeadLetteredMessage);
         var schedule = Assert.Single(sender.Schedules);
+        Assert.Equal("test.command", schedule.Message.ApplicationProperties[MiniBusHeaderNames.MessageType]);
         Assert.Equal("billing-queue", schedule.Destination);
         Assert.InRange(
             schedule.DueTime,

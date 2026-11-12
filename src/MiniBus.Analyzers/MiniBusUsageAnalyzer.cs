@@ -24,7 +24,9 @@ public sealed class MiniBusUsageAnalyzer : DiagnosticAnalyzer
             MiniBusDiagnosticDescriptors.EmptyRouteDestination,
             MiniBusDiagnosticDescriptors.MissingVisibleRoute,
             MiniBusDiagnosticDescriptors.MissingAzureFunctionsRegistration,
-            MiniBusDiagnosticDescriptors.SagaProcessingDisabled);
+            MiniBusDiagnosticDescriptors.SagaProcessingDisabled,
+            MiniBusDiagnosticDescriptors.InvalidMessageIdentity,
+            MiniBusDiagnosticDescriptors.ConflictingMessageIdentity);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -46,7 +48,114 @@ public sealed class MiniBusUsageAnalyzer : DiagnosticAnalyzer
         context.RegisterSymbolAction(symbolContext => AnalyzeNamedType(symbolContext, symbols, state), SymbolKind.NamedType);
         context.RegisterOperationAction(operationContext => AnalyzeInvocation(operationContext, symbols, state), OperationKind.Invocation);
         context.RegisterSyntaxNodeAction(syntaxContext => AnalyzeInvocationSyntax(syntaxContext, symbols), SyntaxKind.InvocationExpression);
+        context.RegisterSyntaxNodeAction(AnalyzeIdentityBlock, SyntaxKind.Block);
         context.RegisterCompilationEndAction(compilationContext => AnalyzeCompilationEnd(compilationContext, state));
+    }
+
+    private static void AnalyzeIdentityBlock(SyntaxNodeAnalysisContext context)
+    {
+        var block = (BlockSyntax)context.Node;
+        var registrations = new Dictionary<ISymbol, List<(ITypeSymbol Type, string Identity, bool Primary)>>(SymbolEqualityComparer.Default);
+        var optionsRegistrations = new Dictionary<ISymbol, List<(ITypeSymbol Type, string Identity, bool Primary)>>(SymbolEqualityComparer.Default);
+        foreach (var statement in block.Statements)
+        {
+            if (statement is not ExpressionStatementSyntax { Expression: InvocationExpressionSyntax invocation }
+                || invocation.Expression is not MemberAccessExpressionSyntax member
+                || context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol method
+                || method.Name != "Map"
+                || method.ContainingType.ToDisplayString() != "MiniBus.Core.Identity.MiniBusMessageIdentityRegistry")
+            {
+                registrations.Clear();
+                optionsRegistrations.Clear();
+                continue;
+            }
+
+            var receiver = context.SemanticModel.GetSymbolInfo(member.Expression, context.CancellationToken).Symbol;
+            var currentRegistrations = registrations;
+            if (member.Expression is MemberAccessExpressionSyntax propertyAccess
+                && receiver is IPropertySymbol property
+                && property.Name == "MessageIdentities"
+                && property.ContainingType.ToDisplayString() == MiniBusSymbolNames.MiniBusProcessorOptions)
+            {
+                receiver = context.SemanticModel.GetSymbolInfo(propertyAccess.Expression, context.CancellationToken).Symbol;
+                currentRegistrations = optionsRegistrations;
+            }
+
+            if (receiver is not (ILocalSymbol or IParameterSymbol))
+            {
+                continue;
+            }
+
+            var type = method.TypeArguments.FirstOrDefault();
+            var arguments = invocation.ArgumentList.Arguments;
+            var operation = context.SemanticModel.GetOperation(invocation, context.CancellationToken) as IInvocationOperation;
+            if (type is null && operation is not null)
+            {
+                type = operation.Arguments
+                    .FirstOrDefault(argument => argument.Parameter?.Name == "messageType")?.Value
+                    is ITypeOfOperation typeOf ? typeOf.TypeOperand : null;
+            }
+            if (type is null)
+            {
+                continue;
+            }
+
+            if (!currentRegistrations.TryGetValue(receiver, out var previous))
+            {
+                previous = new List<(ITypeSymbol, string, bool)>();
+                currentRegistrations.Add(receiver, previous);
+            }
+
+            for (var index = 0; index < arguments.Count; index++)
+            {
+                var argument = arguments[index];
+                var parameter = (context.SemanticModel.GetOperation(argument, context.CancellationToken) as IArgumentOperation)?.Parameter;
+                var parameterName = parameter?.Name ?? argument.NameColon?.Name.Identifier.ValueText
+                    ?? (method.TypeArguments.Length == 0 && index == 0 ? "messageType"
+                        : index == (method.TypeArguments.Length == 0 ? 1 : 0) ? "identity" : "aliases");
+                if (parameterName is not ("identity" or "aliases"))
+                {
+                    continue;
+                }
+                var expressions = argument.Expression switch
+                {
+                    ArrayCreationExpressionSyntax { Initializer: { } initializer } => initializer.Expressions,
+                    ImplicitArrayCreationExpressionSyntax array => array.Initializer.Expressions,
+                    _ => default
+                };
+                if (expressions.Count > 0)
+                {
+                    foreach (var expression in expressions)
+                    {
+                        AnalyzeIdentity(expression, false);
+                    }
+                    continue;
+                }
+                AnalyzeIdentity(argument.Expression, parameterName == "identity");
+            }
+
+            void AnalyzeIdentity(ExpressionSyntax expression, bool primary)
+            {
+                var constant = context.SemanticModel.GetConstantValue(expression, context.CancellationToken);
+                if (!constant.HasValue)
+                {
+                    return;
+                }
+                var identity = constant.Value as string;
+                if (string.IsNullOrWhiteSpace(identity))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(MiniBusDiagnosticDescriptors.InvalidMessageIdentity, expression.GetLocation()));
+                    return;
+                }
+
+                if (previous.Any(item => item.Identity == identity
+                    || (primary && item.Primary && SymbolEqualityComparer.Default.Equals(item.Type, type))))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(MiniBusDiagnosticDescriptors.ConflictingMessageIdentity, expression.GetLocation(), identity));
+                }
+                previous.Add((type, identity!, primary));
+            }
+        }
     }
 
     private static void AnalyzeNamedType(

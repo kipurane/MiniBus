@@ -9,11 +9,33 @@ using MiniBus.Core.Persistence;
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.AzureServiceBus.Tests;
 
 public sealed class AzureServiceBusTransportTests
 {
+    [Fact]
+    public async Task Dispatcher_UsesRegisteredIdentitiesForSendPublishAndSchedule()
+    {
+        var sender = new RecordingSender();
+        var identities = new MiniBusMessageIdentityRegistry()
+            .Map<TestCommand>("command.stable", "command.legacy")
+            .Map<TestEvent>("event.stable", "event.legacy");
+        var routes = new AzureServiceBusTransportRoutes();
+        routes.MapCommand<TestCommand>("commands");
+        routes.MapEvent<TestEvent>("events");
+        var dispatcher = new AzureServiceBusTransportDispatcher(
+            routes, new AzureServiceBusMessageFactory(new RecordingSerializer(), messageIdentities: identities), sender);
+
+        await dispatcher.SendAsync(new TestCommand(Guid.NewGuid()));
+        await dispatcher.PublishAsync(new TestEvent(Guid.NewGuid()));
+        await dispatcher.ScheduleAsync(new TestCommand(Guid.NewGuid()), DateTimeOffset.UtcNow.AddMinutes(1));
+
+        Assert.Equal("command.stable", sender.Sends[0].Message.Subject);
+        Assert.Equal("event.stable", sender.Sends[1].Message.Subject);
+        Assert.Equal("command.stable", Assert.Single(sender.Schedules).Message.Subject);
+    }
     [Fact]
     public void Routes_ResolveCommandQueue()
     {
@@ -425,7 +447,7 @@ public sealed class AzureServiceBusTransportTests
         Assert.Equal("message-1", message.MessageId);
         Assert.Equal("correlation-1", message.CorrelationId);
         Assert.Equal("application/vnd.test+json", message.ContentType);
-        Assert.Equal("Contracts.TestCommand", message.Subject);
+        Assert.Equal(typeof(TestCommand).AssemblyQualifiedName, message.Subject);
     }
 
     [Fact]

@@ -99,7 +99,7 @@ MiniBus SHALL document and test Azure Storage payload registration and Blob payl
 - **THEN** it verifies option validation, payload reference creation, blob name validation, and Azure SDK-independent contract behavior without requiring Azure Storage infrastructure
 
 #### Scenario: Integration tests cover Blob Storage behavior with Testcontainers
-- **WHEN** Azure Storage-backed integration tests run with Docker/Testcontainers available
+- **WHEN** Azure Storage-backed integration tests run with Podman and Testcontainers available
 - **THEN** they start an isolated Azurite container and verify payload write, read, delete, metadata, and missing-payload behavior against Blob Storage-compatible infrastructure
 
 #### Scenario: Integration tests use live storage fallback
@@ -107,7 +107,7 @@ MiniBus SHALL document and test Azure Storage payload registration and Blob payl
 - **THEN** they may use that storage account instead of Testcontainers-backed Azurite to verify payload store behavior
 
 #### Scenario: Storage infrastructure is unavailable
-- **WHEN** Azure Storage-backed integration tests run without Docker/Testcontainers availability and without a live storage connection string
+- **WHEN** Azure Storage-backed integration tests run without Podman and Testcontainers availability and without a live storage connection string
 - **THEN** the tests are skipped with a clear reason without failing the normal test run
 
 ### Requirement: Azure Storage persistence configures Blob audit storage
@@ -163,7 +163,7 @@ MiniBus SHALL test Blob-backed audit writing with unit coverage and Azure Storag
 - **THEN** it verifies audit options validation, envelope serialization, blob name validation, metadata creation, and Azure SDK-independent audit contracts without requiring Azure Storage infrastructure
 
 #### Scenario: Integration tests cover Blob audit writing
-- **WHEN** Azure Storage-backed integration tests run with Docker/Testcontainers available
+- **WHEN** Azure Storage-backed integration tests run with Podman and Testcontainers available
 - **THEN** they start isolated Azurite infrastructure and verify audit blob write and read behavior against Blob Storage-compatible infrastructure
 
 #### Scenario: Integration tests use live storage fallback
@@ -171,5 +171,5 @@ MiniBus SHALL test Blob-backed audit writing with unit coverage and Azure Storag
 - **THEN** they may use that storage account instead of Testcontainers-backed Azurite to verify audit blob behavior
 
 #### Scenario: Storage infrastructure is unavailable
-- **WHEN** Azure Storage-backed integration tests run without Docker/Testcontainers availability and without a live Azure Storage connection string
+- **WHEN** Azure Storage-backed integration tests run without Podman and Testcontainers availability and without a live Azure Storage connection string
 - **THEN** the tests are skipped with a clear reason without failing the normal test run

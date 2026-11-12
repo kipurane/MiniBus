@@ -2,6 +2,8 @@
 
 This project verifies representative MiniBus transport, scheduling, settlement, recoverability, and outbox replay behavior against the production Azure Service Bus service. It is separate from the fast unit tests and the repo-owned emulator workflow.
 
+Live transport coverage includes stable message identity metadata through direct delivery and a scheduled delayed retry.
+
 ## Prerequisites
 
 Use a dedicated test namespace rather than an application namespace. The connection string must allow:

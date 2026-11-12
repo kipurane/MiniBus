@@ -1,8 +1,10 @@
 using Azure.Messaging.ServiceBus;
 using MiniBus.AzureServiceBus.Dispatching;
 using MiniBus.AzureServiceBus.Routing;
+using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
+using MiniBus.Core.Identity;
 using MiniBus.Core.Serialization;
 using HeaderNames = MiniBus.Core.Headers.MiniBusHeaderNames;
 
@@ -11,6 +13,51 @@ namespace MiniBus.AzureServiceBus.IntegrationTests;
 public sealed class LiveTransportIntegrationTests : LiveServiceBusTestBase
 {
     private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(30);
+
+    [LiveServiceBusFact]
+    public async Task StableIdentity_SurvivesBrokerDeliveryAndDelayedRetry()
+    {
+        var scope = CreateScope("stable-retry");
+        var queue = await scope.CreateQueueAsync();
+        await using var receiver = scope.CreateQueueReceiver(queue);
+        await using var sender = new AzureServiceBusSender(scope.Client);
+        var serializer = new SystemTextJsonMessageSerializer();
+        var identities = new MiniBusMessageIdentityRegistry().Map<LiveCommand>("live.command");
+        var routes = new AzureServiceBusTransportRoutes();
+        routes.MapCommand<LiveCommand>(queue);
+        var dispatcher = new AzureServiceBusTransportDispatcher(
+            routes, new AzureServiceBusMessageFactory(serializer, messageIdentities: identities), sender);
+        var scheduler = new AzureServiceBusDelayedRetryScheduler(routes, sender);
+        var command = new LiveCommand(Guid.NewGuid(), "stable retry");
+
+        await dispatcher.SendAsync(command);
+        var original = await LiveServiceBusWait.ReceiveAsync(receiver, queue, ReceiveTimeout);
+        try
+        {
+            Assert.Equal("live.command", original.Subject);
+            Assert.Equal("live.command", original.ApplicationProperties[HeaderNames.MessageType]);
+            Assert.Equal("live.command", original.ApplicationProperties[HeaderNames.EnclosedMessageTypes]);
+            await scheduler.ScheduleRetryAsync(original, typeof(LiveCommand), DateTimeOffset.UtcNow.AddSeconds(3),
+                AzureServiceBusHeaderMapper.ReadHeaders(original));
+        }
+        finally
+        {
+            await receiver.CompleteMessageAsync(original);
+        }
+
+        var retry = await LiveServiceBusWait.ReceiveAsync(receiver, queue, ReceiveTimeout);
+        try
+        {
+            Assert.Equal("live.command", retry.Subject);
+            Assert.Equal("live.command", retry.ApplicationProperties[HeaderNames.MessageType]);
+            Assert.Equal("live.command", retry.ApplicationProperties[HeaderNames.EnclosedMessageTypes]);
+            Assert.Equal(command, serializer.Deserialize(retry.Body, typeof(LiveCommand)));
+        }
+        finally
+        {
+            await receiver.CompleteMessageAsync(retry);
+        }
+    }
 
     [LiveServiceBusFact]
     public async Task RoutedCommand_RoundTripsBodyAndMetadataThroughLiveQueue()

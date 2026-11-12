@@ -6,4 +6,9 @@ public sealed class MiniBusMessageTypeResolutionException : InvalidOperationExce
         : base(message)
     {
     }
+
+    public MiniBusMessageTypeResolutionException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

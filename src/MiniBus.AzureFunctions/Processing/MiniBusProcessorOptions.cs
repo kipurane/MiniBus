@@ -1,5 +1,6 @@
 using MiniBus.Core.Recoverability;
 using MiniBus.Core.Persistence;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.AzureFunctions.Processing;
 
@@ -14,4 +15,6 @@ public sealed class MiniBusProcessorOptions
     public MiniBusRecoverabilityOptions Recoverability { get; } = new();
 
     public MiniBusAuditOptions Audit { get; } = new();
+
+    public MiniBusMessageIdentityRegistry MessageIdentities { get; } = new();
 }

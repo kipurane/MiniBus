@@ -20,7 +20,8 @@ internal sealed class DelayedRetryScheduler
         var scheduler = _serviceProvider.GetService(typeof(IAzureServiceBusDelayedRetryScheduler)) as IAzureServiceBusDelayedRetryScheduler
                         ?? throw new InvalidOperationException("Azure Service Bus delayed retry scheduling is not configured for MiniBus Azure Functions processing. Register MiniBus Azure Functions with AddMiniBusAzureFunctions, or register IAzureServiceBusDelayedRetryScheduler with AzureServiceBusDelayedRetryScheduler.");
 
-        var messageType = MessageTypeResolutionBehavior.ResolveMessageType(context.Headers);
+        var messageType = context.MessageType
+            ?? MessageTypeResolutionBehavior.ResolveMessageType(context.Headers, context.Options.MessageIdentities);
         var dueTime = DateTimeOffset.UtcNow.Add(decision.Delay ?? TimeSpan.Zero);
 
         await scheduler

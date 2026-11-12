@@ -215,21 +215,44 @@ services.AddMiniBusSqlPersistence(
 
 Call `ISqlMiniBusOutboxStore.CleanupAsync` from an application-owned scheduled job or maintenance worker when cleanup should run. Failed outbox records are kept unless `FailedOutboxRetention` is configured.
 
+### Stable message identities
+
+Assign durable contract names in each endpoint's MiniBus registration:
+
+```csharp
+services.AddMiniBusAzureFunctions(options =>
+{
+    options.MessageIdentities.Map<CreateInvoice>(
+        "billing.create-invoice", "Old.Contracts.CreateInvoice, Old.Contracts");
+});
+```
+
+Primary names and aliases are case-sensitive. Choose names that remain unchanged when CLR types or assemblies move. The first name is written for new messages; aliases are accepted when reading older messages. Unregistered contracts retain assembly-qualified names. Configure the same mappings in consumers, producers, and any separately hosted outbox dispatcher.
+
+Deploy consumers with the mappings before producers emit stable names. Keep old names as aliases until queued, scheduled, and outbox messages have drained, including during rollback. A stable name resolves the contract type; it does not transform incompatible message bodies or provide schema versioning.
+
 ### SQL Integration Tests
 
-`MiniBus.Persistence.Sql.Tests` includes SQL Server-backed integration tests. They use Testcontainers by default when Docker is available, so developers do not need to provision a database manually.
+`MiniBus.Persistence.Sql.Tests` includes SQL Server-backed integration tests. They use Testcontainers by default when Podman is available, so developers do not need to provision a database manually.
 
 Prerequisites for the Testcontainers path:
 
-- Docker Desktop or another Docker-compatible engine must be running.
+- Podman must be running. On macOS, start the VM with `podman machine start`.
 - On Apple Silicon, the engine must be able to run `linux/amd64` containers.
 - The tests use the pinned SQL Server image `mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04` and set the container platform to `linux/amd64`.
 
-Run the SQL persistence tests:
+On macOS, run the full solution suite against the running Podman VM from the repository root:
 
 ```bash
-dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj
+DOCKER_HOST="unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')" \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+TESTCONTAINERS_RYUK_DISABLED=true \
+dotnet test MiniBus.sln
 ```
+
+These settings apply only to this command. Testcontainers uses the Podman API to start SQL Server and Azurite. If the test process is interrupted, check `podman ps -a` for leftover test containers because the Ryuk cleanup service is disabled.
+
+The Service Bus emulator acceptance tests also need the [Billing sample emulator stack](samples/MiniBus.Samples.Billing.FunctionApp/README.md) running before the suite starts. Wait for the emulator to report that it is ready. Live Azure Service Bus tests require their own [explicit opt-in](tests/MiniBus.AzureServiceBus.IntegrationTests/README.md).
 
 ## Azure Storage payload persistence and audit blobs
 
@@ -263,18 +286,18 @@ services.AddMiniBusAzureBlobAudit(
 
 Audit records are written before final completion or dead-letter settlement and include message identity, correlation metadata, headers, outcome, retry/dead-letter metadata, and inline body or claim-check reference context. Audit write failures are treated as processing failures when auditing is enabled, so MiniBus does not silently complete a message that was expected to be audited.
 
-`MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same integration coverage against an external Azure Storage account instead of starting Azurite. If neither Docker nor a live connection string is available, those integration tests skip with a clear reason.
+`MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Podman is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same integration coverage against an external Azure Storage account instead of starting Azurite. If neither Podman nor a live connection string is available, those integration tests skip with a clear reason.
 
-If Docker is unavailable, the SQL Server-backed tests skip with a clear reason and the normal unit tests still run.
+If Podman is unavailable, the SQL Server-backed tests skip with a clear reason and the normal unit tests still run.
 
-To use an existing SQL Server/Azure SQL database instead of Docker, set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the tests:
+To use an existing SQL Server/Azure SQL database instead of Podman, set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` before running the tests:
 
 ```bash
 export MINIBUS_SQLSERVER_TEST_CONNECTION_STRING='Server=localhost,1433;Database=master;User Id=sa;Password=Your_password123;TrustServerCertificate=True;Encrypt=True'
 dotnet test tests/MiniBus.Persistence.Sql.Tests/MiniBus.Persistence.Sql.Tests.csproj --filter FullyQualifiedName~SqlServerIntegrationTests
 ```
 
-When the environment variable is set, the integration tests use that database and create isolated `MiniBusTest_<guid>` schemas inside it. When it is not set, they try the Testcontainers/Docker path.
+When the environment variable is set, the integration tests use that database and create isolated `MiniBusTest_<guid>` schemas inside it. When it is not set, they try the Testcontainers with Podman path.
 
 ### Live Azure Service Bus Integration Tests
 
@@ -298,9 +321,9 @@ Without both variables, live tests skip and the normal solution build does not c
 
 [`MiniBus.AcceptanceTests`](https://github.com/kipurane/MiniBus/tree/main/tests/MiniBus.AcceptanceTests) provides a small high-level canary layer above the unit, adapter, transport, SQL, and Azure Storage suites.
 
-Tier 1 acceptance tests are always-on and infrastructure-free. They build a real service provider from sample-style MiniBus registration, use recording transport and settlement doubles, and process a realistic billing workflow without Docker, live Azure Service Bus, or a real Azure Functions host.
+Tier 1 acceptance tests are always-on and infrastructure-free. They build a real service provider from sample-style MiniBus registration, use recording transport and settlement doubles, and process a realistic billing workflow without Podman, live Azure Service Bus, or a real Azure Functions host.
 
-Tier 2 acceptance tests verify one SQL-backed reference workflow. They use the same SQL Server Testcontainers path as the SQL persistence integration tests, or `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` when an external SQL Server/Azure SQL database should be used. If neither Docker nor the external connection string is available, SQL-backed acceptance tests skip with a clear reason.
+Tier 2 acceptance tests verify one SQL-backed reference workflow. They use the same SQL Server Testcontainers path as the SQL persistence integration tests, or `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` when an external SQL Server/Azure SQL database should be used. If neither Podman nor the external connection string is available, SQL-backed acceptance tests skip with a clear reason.
 
 Run the acceptance tests:
 

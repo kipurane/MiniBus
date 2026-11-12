@@ -162,8 +162,8 @@ MiniBus SQL persistence SHALL provide dependency injection registration for SQL 
 ### Requirement: SQL Server integration tests are opt-in
 MiniBus SHALL provide SQL Server-compatible integration tests for SQL persistence behavior that can run against either a Testcontainers-managed SQL Server container or a configured SQL Server / Azure SQL test connection string.
 
-#### Scenario: Docker is available and no external test connection string is configured
-- **WHEN** the SQL persistence integration test suite runs with Docker available and no documented SQL Server / Azure SQL test connection string
+#### Scenario: Podman is available and no external test connection string is configured
+- **WHEN** the SQL persistence integration test suite runs with Podman available and no documented SQL Server / Azure SQL test connection string
 - **THEN** the suite provisions a SQL Server-compatible test database using Testcontainers and verifies schema creation, inbox duplicate detection, outbox capture, outbox claim and dispatch state, failure retry metadata, and persistence transaction behavior
 
 #### Scenario: External test connection string is configured
@@ -172,10 +172,10 @@ MiniBus SHALL provide SQL Server-compatible integration tests for SQL persistenc
 
 #### Scenario: Apple Silicon host runs container-backed tests
 - **WHEN** the SQL persistence integration test suite runs on an Apple Silicon host using the container-backed path
-- **THEN** the suite uses a SQL Server container image and platform strategy compatible with Docker Desktop on Apple Silicon, or skips with a clear message when that strategy is unavailable
+- **THEN** the suite uses a SQL Server container image and platform strategy compatible with Podman on Apple Silicon, or skips with a clear message when that strategy is unavailable
 
-#### Scenario: Neither Docker nor external test connection string is available
-- **WHEN** the SQL persistence integration test suite runs without Docker availability and without the documented SQL Server / Azure SQL test connection string
+#### Scenario: Neither Podman nor external test connection string is available
+- **WHEN** the SQL persistence integration test suite runs without Podman availability and without the documented SQL Server / Azure SQL test connection string
 - **THEN** SQL Server-backed integration tests are skipped with a clear reason without failing the normal test run
 
 ### Requirement: SQL Server setup is documented
@@ -183,7 +183,7 @@ MiniBus SHALL document the SQL Server / Azure SQL setup path and the Testcontain
 
 #### Scenario: Developer reads SQL persistence setup documentation
 - **WHEN** a developer reads MiniBus SQL persistence documentation
-- **THEN** it shows connection-string registration, schema script application, optional connection-factory registration, outbox dispatcher usage, Testcontainers-backed integration test execution, Apple Silicon Docker requirements, and the external connection string fallback
+- **THEN** it shows connection-string registration, schema script application, optional connection-factory registration, outbox dispatcher usage, Testcontainers-backed integration test execution, Apple Silicon Podman requirements, and the external connection string fallback
 
 ### Requirement: SQL persistence behavior is documented and tested
 MiniBus SHALL document SQL inbox/outbox setup and cover SQL persistence behavior with automated tests, including manual dispatch, optional hosted outbox dispatch, timer-triggered Azure Functions dispatch guidance, Testcontainers-backed SQL Server integration tests, and external-connection-string SQL Server/Azure SQL integration tests.
@@ -442,3 +442,34 @@ MiniBus SQL persistence SHALL provide hosted outbox dispatch configuration for p
 - **WHEN** the host begins shutting down while hosted outbox dispatch is enabled
 - **THEN** MiniBus stops starting new dispatch cycles and cancels in-flight work through normal host cancellation
 - **AND** any rows not fully dispatched remain recoverable through the existing outbox claim-lease behavior
+
+### Requirement: SQL outbox stores stable message identities
+MiniBus SQL persistence SHALL store the selected outgoing message identity in the outbox `MessageType` field and preserved MiniBus headers without requiring a schema change.
+
+#### Scenario: Registered contract is captured
+- **WHEN** SQL-backed processing captures an outgoing operation for a contract with a registered stable identity
+- **THEN** the outbox row stores the stable identity in its message type metadata and headers
+
+#### Scenario: Unregistered contract is captured
+- **WHEN** SQL-backed processing captures an outgoing operation for a contract without a stable identity registration
+- **THEN** the outbox row stores the existing assembly-qualified CLR identity
+
+### Requirement: SQL outbox resolves stable and legacy identities
+MiniBus SQL persistence SHALL resolve stored outbox message identities through the configured registry before using the CLR fallback so both new and existing rows remain dispatchable.
+
+#### Scenario: Stable outbox row is dispatched
+- **WHEN** the dispatcher loads an outbox row containing a registered stable identity
+- **THEN** it resolves the current CLR contract for routing and preserves the stored stable identity for transport dispatch
+
+#### Scenario: Legacy outbox row is dispatched
+- **WHEN** the dispatcher loads an existing outbox row containing a resolvable assembly-qualified CLR identity
+- **THEN** it dispatches the row using the compatibility fallback without a data migration
+
+#### Scenario: Historical CLR name is registered as an alias
+- **WHEN** the dispatcher loads an outbox row whose historical CLR identity is an alias for a renamed current contract
+- **THEN** it resolves the row to the current contract type and preserves the stored historical identity during dispatch
+
+#### Scenario: Stored identity is unknown
+- **WHEN** the dispatcher loads an outbox row whose message identity cannot be resolved
+- **THEN** dispatch fails with a clear identity resolution error and existing outbox failure and retry metadata behavior applies
+

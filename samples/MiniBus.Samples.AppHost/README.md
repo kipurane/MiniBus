@@ -6,7 +6,7 @@ The AppHost composes the existing Billing Function App, Inventory Function App, 
 
 ## Prerequisites
 
-- Docker Desktop with Linux containers
+- Podman with Linux containers and a Compose provider such as `podman-compose`
 - Azure Functions Core Tools for the Function App projects
 - .NET SDK from `global.json`
 - Explicit EULA acceptance when starting the local SQL Server and Azure Service Bus emulator containers
@@ -17,16 +17,17 @@ Stop any manually started compose stack first so the AppHost can own the local e
 
 ```bash
 cd samples/MiniBus.Samples.Billing.FunctionApp/servicebus-emulator
-docker compose down
+podman compose down
 cd ../../..
 ```
 
-The AppHost uses Aspire-owned container names and marks them persistent, so stopped compose containers do not block the orchestrated environment. To force a clean rebuild of the AppHost infrastructure, remove the `minibus-aspire-*` containers with Docker after stopping the AppHost.
+The AppHost uses Aspire-owned container names and marks them persistent, so stopped compose containers do not block the orchestrated environment. To force a clean rebuild of the AppHost infrastructure, remove the `minibus-aspire-*` containers with Podman after stopping the AppHost.
 
 Run the AppHost from the repository root and accept the local emulator/container licenses:
 
 ```bash
-ACCEPT_EULA=Y dotnet run --project samples/MiniBus.Samples.AppHost/MiniBus.Samples.AppHost.csproj
+ACCEPT_EULA=Y ASPIRE_CONTAINER_RUNTIME=podman \
+  dotnet run --project samples/MiniBus.Samples.AppHost/MiniBus.Samples.AppHost.csproj
 ```
 
 Wait in the Aspire dashboard until the `sql`, `functions-storage`, and `servicebus-emulator` resources are running. The existing Service Bus emulator topology remains the source of truth:

@@ -1,5 +1,7 @@
 # MiniBus.Templates
 
+The starter registers stable identities for its example contracts in `MiniBusConfiguration.cs`. Keep those identities consistent across producers and consumers. See the root README for aliases and rollout guidance.
+
 `MiniBus.Templates` contains `dotnet new` starters for MiniBus applications.
 
 The first template creates an Azure Functions isolated-worker project with Azure Service Bus transport:

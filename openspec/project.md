@@ -1325,6 +1325,13 @@ This list is the updateable checklist of near-term work still needed for MiniBus
 
 Saga timeout support now uses Service Bus scheduled messages, with SQL outbox capture for durable workflows. The next major framework feature should come from the active backlog below.
 
+### 24.0 Development and verification improvements
+
+- [ ] Add pull-request CI for solution restore, build, infrastructure-free tests, and the tooling web client's existing TypeScript/Vite build. Evaluate a separate container-backed job for SQL Server and Azurite; retain live Azure Service Bus as an explicit opt-in.
+- [ ] Add a SQL Server integration regression test with a mixed outbox batch containing an unresolvable message identity and a valid row. Verify the invalid row records failure metadata and releases its claim while the valid row is dispatched.
+- [ ] Add a test-infrastructure preflight command that checks Podman socket connectivity, SQL Server and Azurite Testcontainers readiness, and Service Bus emulator availability, then reports which integration suites are expected to run or skip without exposing credentials.
+- [ ] Add an OpenSpec review checklist that asks reviewers to associate each completed task with the corresponding implementation, test, or verified artifact. Check coverage before marking tasks complete or archiving; keep the final assessment human-reviewed.
+
 ### 24.1 Core and processing architecture
 
 - [x] Decide whether to introduce a broader `MiniBusOptions` core configuration object beyond the current package-specific options.

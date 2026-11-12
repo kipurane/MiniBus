@@ -20,6 +20,8 @@ public static class MiniBusAzureFunctionsServiceCollectionExtensions
         configureOptions?.Invoke(options);
 
         services.AddSingleton(options);
+        services.RemoveAll<MiniBus.Core.Identity.MiniBusMessageIdentityRegistry>();
+        services.AddSingleton(options.MessageIdentities);
         services.AddSingleton<MessageHandlerInvoker>();
         services.AddSingleton<RecoverabilityDecisionMaker>();
         services.TryAddSingleton<ISagaPersistence, UnconfiguredSagaPersistence>();

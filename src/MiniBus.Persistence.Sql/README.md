@@ -148,6 +148,10 @@ Keep saga data focused on workflow state. Data type renames and shape migrations
 
 ## Verification
 
-`MiniBus.Persistence.Sql.Tests` can run SQL Server-backed integration tests through Testcontainers when Docker is available, or against an external SQL Server/Azure SQL database when `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` is set. If neither path is available, SQL-backed integration tests skip with a clear reason.
+When an outbox dispatcher runs in a separate process, configure the same `MiniBusMessageIdentityRegistry` mappings in both the processing and dispatcher service providers. Register the registry before resolving `SqlOutboxOperationSerializer`. The Billing dispatcher shares the Billing endpoint registration.
+
+`MiniBus.Persistence.Sql.Tests` can run SQL Server-backed integration tests through Testcontainers when Podman is available, or against an external SQL Server/Azure SQL database when `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` is set. If neither path is available, SQL-backed integration tests skip with a clear reason.
+
+See the [Podman test setup](../../README.md#sql-integration-tests) for the macOS socket configuration and full-suite command.
 
 Publishing packages to NuGet is not part of the current repository workflow.

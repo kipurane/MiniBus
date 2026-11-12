@@ -58,19 +58,39 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
         AddParameter(command, "@ClaimLeaseSeconds", _claimLeaseSeconds);
 
         var operations = new List<MiniBusOutboxStoredOperation>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        var failures = new List<(Guid Id, Exception Error)>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            operations.Add(_operationSerializer.Deserialize(
-                reader.GetGuid(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                (byte[])reader.GetValue(4),
-                reader.GetString(5),
-                reader.IsDBNull(6) ? null : (DateTimeOffset)reader.GetValue(6),
-                reader.GetInt32(7)));
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var id = reader.GetGuid(0);
+                try
+                {
+                    operations.Add(_operationSerializer.Deserialize(
+                        id,
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        reader.GetString(3),
+                        (byte[])reader.GetValue(4),
+                        reader.GetString(5),
+                        reader.IsDBNull(6) ? null : (DateTimeOffset)reader.GetValue(6),
+                        reader.GetInt32(7)));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    failures.Add((id, exception));
+                }
+            }
+        }
+
+        foreach (var failure in failures)
+        {
+            await MarkFailedAsync(failure.Id, failure.Error, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (failures.Count > 0 && operations.Count == 0)
+        {
+            throw new InvalidOperationException("MiniBus could not deserialize claimed outbox operations.", failures[0].Error);
         }
 
         return operations;

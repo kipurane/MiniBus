@@ -1,5 +1,7 @@
 # MiniBus.Persistence.AzureStorage
 
+Claim-checked messages use the same configured stable identity as inline messages. Payload retention must cover the delivery and retry window. See the root README for identity registration and migration guidance.
+
 `MiniBus.Persistence.AzureStorage` provides Azure Blob Storage persistence for MiniBus payload storage, claim-check/DataBus behavior, and audit blob writing.
 
 It includes:
@@ -48,6 +50,8 @@ Audit records are written before final completion or dead-letter settlement. The
 
 Use the options overload when the application owns Azure SDK client configuration. With the default registrations, MiniBus normally reuses the resulting `BlobContainerClient` for the service provider lifetime.
 
-`MiniBus.Persistence.AzureStorage.Tests` can run Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available, or against a live storage account when `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` is set.
+`MiniBus.Persistence.AzureStorage.Tests` can run Blob Storage integration coverage through Testcontainers-backed Azurite when Podman is available, or against a live storage account when `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` is set.
+
+See the [Podman test setup](../../README.md#sql-integration-tests) for the macOS socket configuration and full-suite command.
 
 Automatic Azure Storage provisioning is future work.

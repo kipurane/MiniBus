@@ -13,6 +13,7 @@ using MiniBus.Core.Serialization;
 using MiniBus.Persistence.Sql.DependencyInjection;
 using MiniBus.Samples.Contracts.Billing;
 using MiniBus.Samples.Contracts.Inventory;
+using MiniBus.Samples.Contracts;
 using MiniBus.Samples.Billing.FunctionApp.Handlers;
 using MiniBus.Samples.Billing.FunctionApp.Sagas;
 
@@ -27,6 +28,7 @@ public static class MiniBusFunctionAppConfiguration
         services.AddMiniBusAzureFunctions(options =>
         {
             options.EndpointName = "Billing";
+            SampleMessageIdentities.Configure(options.MessageIdentities);
             options.EnableSagas = true;
             options.Recoverability.ImmediateRetries = 3;
             options.Recoverability.DelayedRetries.Add(TimeSpan.FromSeconds(10));

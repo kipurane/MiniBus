@@ -1,5 +1,7 @@
 # MiniBus.AzureFunctions
 
+Configure stable wire identities through `options.MessageIdentities` in `AddMiniBusAzureFunctions`. The processor and dependency-injected transport and SQL services share that registry. See the root README for aliases and deployment order.
+
 `MiniBus.AzureFunctions` provides Azure Functions isolated worker integration for processing Azure Service Bus trigger messages through MiniBus.
 
 Manual Azure Functions wrappers remain a supported integration model. They keep static trigger declarations in the function app and delegate processing to `MiniBusProcessor`. Applications can also opt into source-generated wrappers through `MiniBus.AzureFunctions.SourceGenerators` when they want MiniBus to generate the repetitive wrapper class.
@@ -242,7 +244,9 @@ Outbox rows use deterministic outgoing message ids for replay-safe dispatch. Cla
 
 When SQL persistence is registered and no custom saga persistence has already been registered, it also provides SQL-backed `ISagaPersistence`. Saga rows store serialized saga data, completion state, timestamps, and SQL Server rowversion metadata. Saves and completions use optimistic concurrency; stale updates fail with `SagaPersistenceException` and flow through normal recoverability. During SQL-backed processing, saga persistence uses the active SQL processing session so saga state, inbox state, and outbox operations commit or roll back together. Standalone SQL saga persistence remains available for direct lifecycle access, but it is separate from the atomic message-processing path.
 
-`MiniBus.Persistence.Sql.Tests` runs SQL Server-backed integration coverage through Testcontainers when Docker is available. The test fixture uses a pinned SQL Server 2022 Linux container image and requests `linux/amd64`, which lets Apple Silicon machines run it through Docker Desktop's amd64 emulation. If Docker is unavailable, those tests skip with a clear reason and the normal unit test run still passes. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` to run the same integration coverage against an external SQL Server/Azure SQL database instead of starting a container.
+`MiniBus.Persistence.Sql.Tests` runs SQL Server-backed integration coverage through Testcontainers when Podman is available. The test fixture uses a pinned SQL Server 2022 Linux container image and requests `linux/amd64`, which lets Apple Silicon machines run it through Podman’s amd64 emulation. If Podman is unavailable, those tests skip with a clear reason and the normal unit test run still passes. Set `MINIBUS_SQLSERVER_TEST_CONNECTION_STRING` to run the same integration coverage against an external SQL Server/Azure SQL database instead of starting a container.
+
+See the [Podman test setup](../../README.md#sql-integration-tests) for the macOS socket configuration and full-suite command.
 
 ## Azure Storage payload persistence and claim-check
 
@@ -283,4 +287,4 @@ services.AddMiniBusAzureBlobAudit(
 
 Audit write failures are fail-closed: if auditing is enabled and the audit blob cannot be written, MiniBus treats that as a processing failure and does not complete or dead-letter the received message as if auditing had succeeded. Claim-checked messages audit claim-check metadata by default rather than duplicating large resolved payload bytes.
 
-`MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Docker is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same tests against a live Azure Storage account.
+`MiniBus.Persistence.AzureStorage.Tests` runs Blob Storage integration coverage through Testcontainers-backed Azurite when Podman is available. Set `MINIBUS_AZURE_STORAGE_TEST_CONNECTION_STRING` to run the same tests against a live Azure Storage account.

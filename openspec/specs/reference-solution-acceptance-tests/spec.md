@@ -4,14 +4,14 @@
 Defines high-level reference solution acceptance tests that prove MiniBus can be assembled through sample-style/public registration and process realistic workflows across core, Azure Functions processing, Azure Service Bus transport, saga, and SQL persistence pieces.
 ## Requirements
 ### Requirement: Tier 1 reference solution smoke test
-MiniBus SHALL provide always-on high-level acceptance coverage that verifies sample-style MiniBus reference endpoints can be assembled through dependency injection and process the representative Billing workflow without requiring Docker, live Azure Service Bus, or a real Azure Functions host.
+MiniBus SHALL provide always-on high-level acceptance coverage that verifies sample-style MiniBus reference endpoints can be assembled through dependency injection and process the representative Billing workflow without requiring Podman, live Azure Service Bus, or a real Azure Functions host.
 
 #### Scenario: Sample-style billing workflow composes
 - **WHEN** the Tier 1 acceptance test builds a real service provider using sample-style MiniBus registration and processes a `CreateInvoice` Service Bus message through `MiniBusProcessor`
 - **THEN** MiniBus invokes the Billing handler, publishes the invoice-created event, sends the invoice-receipt command, sends the Inventory reservation command, schedules the saga timeout message, and completes the received message through recording settlement actions
 
 #### Scenario: Tier 1 test is infrastructure-free
-- **WHEN** the normal test suite runs without Docker, Azure Service Bus, or an Azure Functions host
+- **WHEN** the normal test suite runs without Podman, Azure Service Bus, or an Azure Functions host
 - **THEN** the Tier 1 acceptance coverage uses recording or fake transport and settlement dependencies and remains eligible to run with the normal unit and component tests
 
 ### Requirement: Emulator-backed reference acceptance covers endpoint boundary
@@ -42,7 +42,7 @@ MiniBus SHALL provide SQL-backed high-level acceptance scenarios that verify the
 - **AND** MiniBus marks the dispatched SQL outbox rows as dispatched so they no longer appear as pending or reclaimable work
 
 #### Scenario: SQL-backed scenario follows existing environment behavior
-- **WHEN** the Tier 2 acceptance scenario runs without Docker availability and without the documented SQL Server/Azure SQL test connection string
+- **WHEN** the Tier 2 acceptance scenario runs without Podman availability and without the documented SQL Server/Azure SQL test connection string
 - **THEN** the SQL-backed acceptance scenario is skipped with a clear reason without failing the normal infrastructure-free test run
 
 ### Requirement: Reference acceptance tests remain focused

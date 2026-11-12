@@ -4,6 +4,7 @@ using MiniBus.AzureFunctions.Processing.Pipeline;
 using MiniBus.AzureServiceBus.TransportMessageMapping;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Serialization;
+using MiniBus.Core.Identity;
 
 namespace MiniBus.AzureFunctions.Tests;
 
@@ -72,6 +73,32 @@ public sealed class MiniBusProcessingPipelineTests
         Assert.Equal("message-1", context.Headers[MiniBusHeaderNames.MessageId]);
         Assert.Equal(typeof(TestCommand), context.MessageType);
         Assert.IsType<TestCommand>(context.DeserializedMessage);
+        Assert.Equal(typeof(TestCommand), serializer.DeserializedType);
+    }
+
+    [Theory]
+    [InlineData("orders.submit")]
+    [InlineData("Legacy.SubmitOrder, Legacy.Contracts")]
+    public async Task MessageTypeResolutionBehavior_ResolvesStableIdentityAndAlias(string identity)
+    {
+        var identities = new MiniBusMessageIdentityRegistry()
+            .Map<TestCommand>("orders.submit", "Legacy.SubmitOrder, Legacy.Contracts");
+        var serializer = new RecordingSerializer(new TestCommand(Guid.NewGuid()));
+        var pipeline = new MiniBusProcessingPipeline(new IMiniBusProcessingBehavior[]
+        {
+            new ReceivedMessageHeadersBehavior(),
+            new MessageTypeResolutionBehavior(identities),
+            new MessageDeserializationBehavior(serializer)
+        });
+        var message = CreateMessage(new Dictionary<string, object>
+        {
+            [MiniBusHeaderNames.MessageType] = identity
+        });
+        var context = new MiniBusProcessingContext(message, new MiniBusProcessorOptions());
+
+        await pipeline.InvokeAsync(context);
+
+        Assert.Equal(typeof(TestCommand), context.MessageType);
         Assert.Equal(typeof(TestCommand), serializer.DeserializedType);
     }
 

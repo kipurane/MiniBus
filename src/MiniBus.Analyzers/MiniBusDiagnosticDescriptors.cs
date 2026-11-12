@@ -6,6 +6,16 @@ internal static class MiniBusDiagnosticDescriptors
 {
     private const string Category = "MiniBus";
 
+    public static readonly DiagnosticDescriptor InvalidMessageIdentity = new(
+        "MBAN009", "Message identity must not be empty",
+        "MiniBus message identity must not be null, empty, or whitespace",
+        Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ConflictingMessageIdentity = new(
+        "MBAN010", "Message identity registration conflicts",
+        "MiniBus message identity registration '{0}' conflicts with a visible registration",
+        Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor AbstractHandler = new(
         id: "MBAN001",
         title: "MiniBus handler type must be concrete",

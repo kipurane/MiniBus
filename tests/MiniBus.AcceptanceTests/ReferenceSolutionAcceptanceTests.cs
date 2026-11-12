@@ -161,7 +161,14 @@ public sealed class ReferenceSolutionAcceptanceTests
     {
         return message.ApplicationProperties.TryGetValue(MiniBusHeaderNames.MessageType, out var value)
                && value is string typeName
-               && typeName.Contains(typeof(TMessage).FullName!, StringComparison.Ordinal);
+               && CreateSampleIdentities().Resolve(typeName) == typeof(TMessage);
+    }
+
+    private static MiniBus.Core.Identity.MiniBusMessageIdentityRegistry CreateSampleIdentities()
+    {
+        var identities = new MiniBus.Core.Identity.MiniBusMessageIdentityRegistry();
+        MiniBus.Samples.Contracts.SampleMessageIdentities.Configure(identities);
+        return identities;
     }
 
     internal static IConfiguration CreateBillingConfiguration(
@@ -321,7 +328,7 @@ public sealed class SqlBackedReferenceSolutionAcceptanceTests :
             FROM {database.OutboxTableName}
             WHERE OperationKind = 'Schedule';
             """);
-        Assert.Contains(typeof(InvoicePaymentTimeout).FullName!, scheduledMessageType, StringComparison.Ordinal);
+        Assert.Equal("billing.invoice-payment-timeout", scheduledMessageType);
 
         var sagaCorrelationId = await database.QueryScalarAsync<string>($"""
             SELECT CorrelationId

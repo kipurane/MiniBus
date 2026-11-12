@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using MiniBus.Core.Context;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
+using MiniBus.Core.Identity;
 using MiniBus.Core.Persistence;
 using MiniBus.Core.Sagas;
 using MiniBus.Core.Serialization;
@@ -122,6 +123,85 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
         Assert.Contains("correlation-1", reader.GetString(2), StringComparison.Ordinal);
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(3)));
         Assert.False(await reader.ReadAsync());
+    }
+
+    [SqlServerFact]
+    public async Task Outbox_StableAndLegacyIdentitiesResolveFromPersistedRows()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        var identities = new MiniBusMessageIdentityRegistry()
+            .Map<TestCommand>("billing.command", "Legacy.Command, Legacy.Contracts");
+        var serializer = new SqlOutboxOperationSerializer(new JsonMessageSerializer(), messageIdentities: identities);
+        var options = new MiniBusSqlPersistenceOptions
+        {
+            SchemaName = database.SchemaName,
+            ConnectionFactory = database.CreateConnection
+        };
+        var factory = new SqlMiniBusPersistenceSessionFactory(
+            options, serializer, new SqlSagaDataSerializer(new JsonMessageSerializer()), new NoopSqlMiniBusOutboxDispatchSignal());
+        await using (var session = await factory.CreateAsync())
+        {
+            await session.CommitAsync(database.CreateInboxMessage("stable-id"), new[] { CreateOutboxOperation() });
+        }
+        await using (var legacySession = await database.CreateSessionAsync())
+        {
+            await legacySession.CommitAsync(database.CreateInboxMessage("legacy-id"), new[] { CreateOutboxOperation() });
+        }
+        await using (var aliasSession = await database.CreateSessionAsync())
+        {
+            await aliasSession.CommitAsync(database.CreateInboxMessage("alias-id"), new[] { CreateOutboxOperation() });
+        }
+        await using (var connection = database.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                UPDATE {database.OutboxTableName}
+                SET MessageType = 'Legacy.Command, Legacy.Contracts',
+                    HeadersJson = @headers
+                WHERE IncomingMessageId = 'alias-id';
+                """;
+            command.Parameters.Add(new SqlParameter("@headers", SqlOutboxOperationSerializer.SerializeHeaders(
+                new Dictionary<string, string> { [MiniBusHeaderNames.MessageType] = "Legacy.Command, Legacy.Contracts" })));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var store = new SqlMiniBusOutboxStore(options, serializer);
+        var claimed = await store.ClaimPendingAsync(10);
+        Assert.Equal(3, claimed.Count);
+        Assert.All(claimed, item => Assert.Equal(typeof(TestCommand), item.MessageType));
+        Assert.Contains(claimed, item => item.Headers[MiniBusHeaderNames.MessageType] == "billing.command");
+        Assert.Contains(claimed, item => item.Headers[MiniBusHeaderNames.MessageType] == typeof(TestCommand).AssemblyQualifiedName);
+        Assert.Contains(claimed, item => item.Headers[MiniBusHeaderNames.MessageType] == "Legacy.Command, Legacy.Contracts");
+    }
+
+    [SqlServerFact]
+    public async Task Outbox_UnknownIdentityRecordsFailureAndReleasesClaim()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.CommitAsync(database.CreateInboxMessage("unknown-id"), new[] { CreateOutboxOperation() });
+        }
+        await using (var connection = database.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"UPDATE {database.OutboxTableName} SET MessageType = 'unknown.identity'";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => database.CreateOutboxStore().ClaimPendingAsync(10));
+        Assert.Contains("unknown.identity", error.InnerException!.Message, StringComparison.Ordinal);
+        await using var verify = database.CreateConnection();
+        await verify.OpenAsync();
+        await using var query = verify.CreateCommand();
+        query.CommandText = $"SELECT AttemptCount, LastError, ClaimedUtc FROM {database.OutboxTableName}";
+        await using var reader = await query.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(1, reader.GetInt32(0));
+        Assert.Contains("unknown.identity", reader.GetString(1), StringComparison.Ordinal);
+        Assert.True(reader.IsDBNull(2));
     }
 
     [SqlServerFact]

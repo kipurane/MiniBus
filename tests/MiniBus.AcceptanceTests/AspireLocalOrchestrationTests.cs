@@ -60,7 +60,7 @@ public sealed class AspireLocalOrchestrationTests
         Assert.Contains("ACCEPT_EULA=Y", readme, StringComparison.Ordinal);
         Assert.Contains("7073", readme, StringComparison.Ordinal);
         Assert.Contains(@"""ACCEPT_EULA"": ""Y""", launchSettings, StringComparison.Ordinal);
-        Assert.Contains("docker compose down", readme, StringComparison.Ordinal);
+        Assert.Contains("podman compose down", readme, StringComparison.Ordinal);
         Assert.Contains("Manual Fallback", readme, StringComparison.Ordinal);
         Assert.Contains("MiniBus.Tooling.Web", readme, StringComparison.Ordinal);
     }

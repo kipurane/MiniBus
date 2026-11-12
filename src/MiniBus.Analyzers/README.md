@@ -1,5 +1,7 @@
 # MiniBus.Analyzers
 
+Stable identity diagnostics are warnings. MBAN009 reports a constant blank identity; replace `identities.Map<Order>(" ")` with `identities.Map<Order>("orders.submit")`. MBAN010 reports conflicting constant registrations on the same visible registry in a block, including `options.MessageIdentities`; assign each message one primary identity and each identity to one contract. Dynamic configuration and registrations split across blocks are validated at runtime. Suppress an intentional diagnostic with `#pragma warning disable MBAN009` or `MBAN010`, and restore it after the affected code.
+
 Roslyn analyzers for common MiniBus configuration, routing, handler, and message contract mistakes.
 
 ```xml
@@ -20,6 +22,8 @@ The analyzer package is optional developer tooling. It runs during normal C# bui
 | MBAN006 | Warning | A visible send, publish, or schedule call has no matching visible route. |
 | MBAN007 | Warning | MiniBus Azure Functions processor usage is visible without visible `AddMiniBusAzureFunctions` registration. |
 | MBAN008 | Warning | Saga usage is visible but saga processing is visibly disabled. |
+| MBAN009 | Warning | A visible constant message identity is blank. |
+| MBAN010 | Warning | Visible message identity registrations conflict. |
 
 ## Examples
 

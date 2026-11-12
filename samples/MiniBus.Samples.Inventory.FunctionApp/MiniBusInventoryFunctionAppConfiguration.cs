@@ -6,6 +6,7 @@ using MiniBus.AzureServiceBus.Recoverability;
 using MiniBus.Core.Handlers;
 using MiniBus.Core.Serialization;
 using MiniBus.Samples.Contracts.Inventory;
+using MiniBus.Samples.Contracts;
 using MiniBus.Samples.Inventory.FunctionApp.Handlers;
 
 namespace MiniBus.Samples.Inventory.FunctionApp;
@@ -19,6 +20,7 @@ public static class MiniBusInventoryFunctionAppConfiguration
         services.AddMiniBusAzureFunctions(options =>
         {
             options.EndpointName = "Inventory";
+            SampleMessageIdentities.Configure(options.MessageIdentities);
             options.Recoverability.ImmediateRetries = 3;
             options.Recoverability.DelayedRetries.Clear();
             options.Recoverability.DeadLetterAfterRetriesExhausted = true;
