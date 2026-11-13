@@ -300,6 +300,181 @@ public sealed class CoreMessageProcessingTests
         Assert.Equal("the-original-message", decision.Headers[MiniBusRecoverabilityHeaderNames.OriginalMessageId]);
     }
 
+    [Fact]
+    public void RecoverabilityDecisionMaker_ThrowsWhenHeadersIsNull()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 1 };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        Assert.Throws<ArgumentNullException>(() => decisionMaker.Decide(
+            null!,
+            options,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1"));
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ThrowsWhenOptionsIsNull()
+    {
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        Assert.Throws<ArgumentNullException>(() => decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            null!,
+            new InvalidOperationException("handler failed"),
+            "transport-message-1"));
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ThrowsWhenExceptionIsNull()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 1 };
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        Assert.Throws<ArgumentNullException>(() => decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            null!,
+            "transport-message-1"));
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_ProgressesThroughMultipleDelayedRetries()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 0 };
+        options.DelayedRetries.Add(TimeSpan.FromSeconds(10));
+        options.DelayedRetries.Add(TimeSpan.FromMinutes(1));
+        options.DelayedRetries.Add(TimeSpan.FromMinutes(5));
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var firstDelayed = decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("fail"),
+            "msg-1");
+        Assert.Equal(RecoverabilityDecisionKind.DelayedRetry, firstDelayed.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(10), firstDelayed.Delay);
+        Assert.Equal(1, firstDelayed.DelayedAttempt);
+
+        var secondDelayed = decisionMaker.Decide(
+            new Dictionary<string, string>(firstDelayed.Headers, StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("fail"),
+            "msg-1");
+        Assert.Equal(RecoverabilityDecisionKind.DelayedRetry, secondDelayed.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(1), secondDelayed.Delay);
+        Assert.Equal(2, secondDelayed.DelayedAttempt);
+
+        var thirdDelayed = decisionMaker.Decide(
+            new Dictionary<string, string>(secondDelayed.Headers, StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("fail"),
+            "msg-1");
+        Assert.Equal(RecoverabilityDecisionKind.DelayedRetry, thirdDelayed.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(5), thirdDelayed.Delay);
+        Assert.Equal(3, thirdDelayed.DelayedAttempt);
+
+        var deadLetter = decisionMaker.Decide(
+            new Dictionary<string, string>(thirdDelayed.Headers, StringComparer.Ordinal),
+            options,
+            new InvalidOperationException("fail"),
+            "msg-1");
+        Assert.Equal(RecoverabilityDecisionKind.DeadLetter, deadLetter.Kind);
+    }
+
+    [Fact]
+    public void RecoverabilityDecisionMaker_TruncatesDeadLetterDescriptionWhenTooLong()
+    {
+        var options = new MiniBusRecoverabilityOptions { ImmediateRetries = 0 };
+        var longMessage = new string('x', 5000);
+        var decisionMaker = new RecoverabilityDecisionMaker();
+
+        var decision = decisionMaker.Decide(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            options,
+            new InvalidOperationException(longMessage),
+            "transport-message-1");
+
+        Assert.Equal(RecoverabilityDecisionKind.DeadLetter, decision.Kind);
+        Assert.NotNull(decision.DeadLetterDescription);
+        Assert.True(decision.DeadLetterDescription!.Length <= 4096);
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_MapByType_RegistersRoute()
+    {
+        var routes = new CommandRouteRegistry();
+        routes.Map(typeof(TestCommand), "billing-queue");
+
+        Assert.Equal("billing-queue", routes.GetDestination(typeof(TestCommand)));
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_MapByType_ThrowsWhenCommandTypeIsNull()
+    {
+        var routes = new CommandRouteRegistry();
+
+        Assert.Throws<ArgumentNullException>(() => routes.Map(null!, "billing-queue"));
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_MapByType_ThrowsWhenDestinationIsEmpty()
+    {
+        var routes = new CommandRouteRegistry();
+
+        Assert.Throws<ArgumentException>(() => routes.Map(typeof(TestCommand), ""));
+        Assert.Throws<ArgumentException>(() => routes.Map(typeof(TestCommand), "   "));
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_MapByType_ThrowsWhenTypeDoesNotImplementICommand()
+    {
+        var routes = new CommandRouteRegistry();
+
+        Assert.Throws<ArgumentException>(() => routes.Map(typeof(TestMessage), "billing-queue"));
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_MapByType_AllowsIdempotentRegistrationOfSameDestination()
+    {
+        var routes = new CommandRouteRegistry();
+        routes.Map(typeof(TestCommand), "billing-queue");
+
+        routes.Map(typeof(TestCommand), "billing-queue");
+
+        Assert.Equal("billing-queue", routes.GetDestination(typeof(TestCommand)));
+    }
+
+    [Fact]
+    public void CommandRouteRegistry_GetDestinationByType_ThrowsWhenCommandTypeIsNull()
+    {
+        var routes = new CommandRouteRegistry();
+
+        Assert.Throws<ArgumentNullException>(() => routes.GetDestination(null!));
+    }
+
+    [Fact]
+    public void HandlerDiscovery_DeduplicatesAcrossDuplicateAssemblies()
+    {
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+
+        var registrations = HandlerDiscovery.Discover(assembly, assembly);
+
+        var commandHandlerRegistrations = registrations
+            .Where(r => r.HandlerType == typeof(RecordingCommandHandler))
+            .ToList();
+
+        Assert.Single(commandHandlerRegistrations);
+    }
+
+    [Fact]
+    public void HandlerDiscovery_ReturnsEmptyForEmptyAssemblyList()
+    {
+        var registrations = HandlerDiscovery.Discover(Array.Empty<System.Reflection.Assembly>());
+
+        Assert.Empty(registrations);
+    }
+
     private sealed record TestMessage(Guid Id) : IMessage;
 
     private sealed record TestCommand(Guid Id) : ICommand;

@@ -97,6 +97,175 @@ public sealed class ClaimCheckTests
     }
 
     [Fact]
+    public async Task Transformer_ThrowsWhenMessageIsNull()
+    {
+        var transformer = new MiniBusClaimCheckMessageTransformer(new RecordingSerializer("body"));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => transformer.TransformAsync(null!, typeof(TestCommand)));
+    }
+
+    [Fact]
+    public async Task Transformer_ThrowsWhenMessageTypeIsNull()
+    {
+        var transformer = new MiniBusClaimCheckMessageTransformer(new RecordingSerializer("body"));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => transformer.TransformAsync(new TestCommand(Guid.NewGuid()), null!));
+    }
+
+    [Fact]
+    public async Task Transformer_ThrowsWhenMessageIsNotAssignableToType()
+    {
+        var transformer = new MiniBusClaimCheckMessageTransformer(new RecordingSerializer("body"));
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => transformer.TransformAsync(new TestCommand(Guid.NewGuid()), typeof(string)));
+    }
+
+    [Fact]
+    public async Task Transformer_RejectsProviderMismatch()
+    {
+        var store = new RecordingPayloadStore
+        {
+            Reference = new MiniBusClaimCheckPayloadReference(
+                "wrong-provider",
+                "container",
+                "blob.bin",
+                "payload-1",
+                10,
+                null,
+                DateTimeOffset.UtcNow,
+                null)
+        };
+        var transformer = new MiniBusClaimCheckMessageTransformer(
+            new RecordingSerializer("large-body"),
+            new MiniBusClaimCheckOptions
+            {
+                Enabled = true,
+                PayloadThresholdBytes = 1,
+                Provider = MiniBusClaimCheckProviderNames.AzureBlobStorage
+            },
+            store);
+
+        var exception = await Assert.ThrowsAsync<MiniBusClaimCheckConfigurationException>(
+            () => transformer.TransformAsync(new TestCommand(Guid.NewGuid()), typeof(TestCommand)));
+
+        Assert.Contains("wrong-provider", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClaimCheckOptions_Validate_ThrowsWhenThresholdIsNegative()
+    {
+        var options = new MiniBusClaimCheckOptions
+        {
+            Enabled = true,
+            PayloadThresholdBytes = -1
+        };
+
+        Assert.Throws<MiniBusClaimCheckConfigurationException>(() => options.Validate());
+    }
+
+    [Fact]
+    public void ClaimCheckOptions_Validate_ThrowsWhenProviderIsEmpty()
+    {
+        var options = new MiniBusClaimCheckOptions
+        {
+            Enabled = true,
+            Provider = ""
+        };
+
+        Assert.Throws<MiniBusClaimCheckConfigurationException>(() => options.Validate());
+    }
+
+    [Fact]
+    public void ClaimCheckOptions_Validate_SucceedsWhenDisabled()
+    {
+        var options = new MiniBusClaimCheckOptions
+        {
+            Enabled = false,
+            PayloadThresholdBytes = -1,
+            Provider = ""
+        };
+
+        options.Validate();
+    }
+
+    [Fact]
+    public void ClaimCheckEnvelope_RoundTripsFromReference()
+    {
+        var createdUtc = new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero);
+        var expiresUtc = createdUtc.AddHours(24);
+        var reference = new MiniBusClaimCheckPayloadReference(
+            MiniBusClaimCheckProviderNames.AzureBlobStorage,
+            "container",
+            "blob.bin",
+            "payload-1",
+            256,
+            "application/json",
+            createdUtc,
+            expiresUtc);
+
+        var envelope = MiniBusClaimCheckEnvelope.FromReference(reference);
+
+        Assert.Equal(reference.Provider, envelope.Provider);
+        Assert.Equal(reference.ContainerName, envelope.ContainerName);
+        Assert.Equal(reference.BlobName, envelope.BlobName);
+        Assert.Equal(reference.PayloadId, envelope.PayloadId);
+        Assert.Equal(reference.Length, envelope.PayloadLength);
+        Assert.Equal(reference.CreatedUtc, envelope.CreatedUtc);
+        Assert.Equal(reference.ExpiresUtc, envelope.ExpiresUtc);
+    }
+
+    [Fact]
+    public void ClaimCheckEnvelope_ToBinaryData_ProducesValidJson()
+    {
+        var envelope = new MiniBusClaimCheckEnvelope(
+            MiniBusClaimCheckProviderNames.AzureBlobStorage,
+            "container",
+            "blob.bin",
+            "payload-1",
+            256,
+            "application/json",
+            new DateTimeOffset(2026, 5, 15, 12, 0, 0, TimeSpan.Zero),
+            null);
+
+        var data = envelope.ToBinaryData();
+
+        var json = data.ToString();
+        Assert.NotEmpty(json);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Equal("payload-1", doc.RootElement.GetProperty("payloadId").GetString());
+        Assert.Equal(256, doc.RootElement.GetProperty("payloadLength").GetInt64());
+    }
+
+    [Fact]
+    public void Transformer_CreateHeaders_AddsRequiredHeadersWhenNoneProvided()
+    {
+        var headers = MiniBusClaimCheckMessageTransformer.CreateHeaders(typeof(TestCommand), null);
+
+        Assert.True(headers.ContainsKey(MiniBusHeaderNames.MessageType));
+        Assert.True(headers.ContainsKey(MiniBusHeaderNames.EnclosedMessageTypes));
+        Assert.True(headers.ContainsKey(MiniBusHeaderNames.MessageId));
+        Assert.Equal(MiniBusClaimCheckMessageTransformer.DefaultContentType, headers[MiniBusHeaderNames.ContentType]);
+    }
+
+    [Fact]
+    public void Transformer_CreateHeaders_DoesNotOverwriteExistingHeaders()
+    {
+        var existingHeaders = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MiniBusHeaderNames.MessageId] = "existing-message-id",
+            [MiniBusHeaderNames.ContentType] = "text/plain"
+        };
+
+        var headers = MiniBusClaimCheckMessageTransformer.CreateHeaders(typeof(TestCommand), existingHeaders);
+
+        Assert.Equal("existing-message-id", headers[MiniBusHeaderNames.MessageId]);
+        Assert.Equal("text/plain", headers[MiniBusHeaderNames.ContentType]);
+    }
+
+    [Fact]
     public void ReferenceReader_RejectsInvalidPayloadLength()
     {
         var headers = CreateClaimCheckHeaders();
