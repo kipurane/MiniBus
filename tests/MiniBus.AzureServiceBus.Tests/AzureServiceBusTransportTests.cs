@@ -15,6 +15,24 @@ namespace MiniBus.AzureServiceBus.Tests;
 
 public sealed class AzureServiceBusTransportTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(1000)]
+    public void MessageFactory_SynchronousFreshMessageRejectsEnabledClaimCheck(int threshold)
+    {
+        var serializer = new RecordingSerializer();
+        var store = new RecordingPayloadStore();
+        var factory = new AzureServiceBusMessageFactory(serializer,
+            new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = threshold }, store);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            factory.CreateMessage(new TestCommand(Guid.NewGuid()), typeof(TestCommand)));
+
+        Assert.Contains("asynchronous", exception.Message, StringComparison.Ordinal);
+        Assert.Null(serializer.SerializedMessage);
+        Assert.Empty(store.Writes);
+    }
+
     [Fact]
     public async Task Dispatcher_UsesRegisteredIdentitiesForSendPublishAndSchedule()
     {

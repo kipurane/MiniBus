@@ -68,18 +68,18 @@ public sealed class SqlMiniBusOutboxDispatcher
         CancellationToken cancellationToken = default)
     {
         var batchScope = _metrics.StartBatch();
-        IReadOnlyList<MiniBusOutboxStoredOperation>? operations = null;
+        var claimedCount = 0;
         var dispatched = 0;
         var failed = 0;
 
         try
         {
-            operations = await _store
-                .ClaimPendingAsync(_options.DispatcherBatchSize, cancellationToken)
-                .ConfigureAwait(false);
-            var claimedCount = operations.Count;
+            var claim = await ClaimBatchAsync(cancellationToken).ConfigureAwait(false);
+            claimedCount = claim.ClaimedCount;
+            failed = claim.FailedCount;
+            claim.ThrowIfAllFailed();
 
-            foreach (var operation in operations)
+            foreach (var operation in claim.Operations)
             {
                 var operationScope = _metrics.StartOperation();
                 try
@@ -125,11 +125,24 @@ public sealed class SqlMiniBusOutboxDispatcher
         {
             _metrics.RecordBatch(
                 batchScope,
-                operations?.Count ?? 0,
+                claimedCount,
                 dispatched,
                 failed,
                 SqlMiniBusOutboxDispatchOutcomes.Failed);
             throw;
         }
+    }
+
+    private async Task<SqlMiniBusOutboxClaimResult> ClaimBatchAsync(CancellationToken cancellationToken)
+    {
+        if (_store is ISqlMiniBusOutboxBatchStore batchStore)
+        {
+            return await batchStore.ClaimBatchAsync(_options.DispatcherBatchSize, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var operations = await _store.ClaimPendingAsync(_options.DispatcherBatchSize, cancellationToken)
+            .ConfigureAwait(false);
+        return new SqlMiniBusOutboxClaimResult(operations, FailedCount: 0, FirstFailure: null);
     }
 }

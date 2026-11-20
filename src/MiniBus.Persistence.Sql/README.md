@@ -55,6 +55,8 @@ services.AddMiniBusSqlPersistence(options =>
 
 When SQL persistence is enabled, MiniBus checks the inbox before invoking handlers or sagas. Duplicate messages are completed or skipped without invoking handlers or sagas again. Successful processing commits the inbox record, captured outbox operations, and any saga state changes in one SQL transaction before the Azure Functions adapter completes the received Service Bus message. If that SQL commit fails, none of the inbox, outbox, or saga changes from the attempt are durable and the message is not treated as complete.
 
+`SqlOutboxOperationSerializer.SerializeAsync` and the transport's asynchronous message factory share outgoing message preparation. With claim-check enabled, use `SerializeAsync` for fresh outbox operations. The selected identity is stored consistently in the message-type column and prepared headers, and replay preserves historical identity headers.
+
 Outgoing operations are at-least-once. The SQL outbox dispatcher claims a bounded batch, dispatches each operation through the configured transport, and marks successful rows dispatched. If a process exits after the broker accepts a message but before the row is marked dispatched, the operation can be sent again. Use deterministic outgoing message ids, broker duplicate detection where configured, and idempotent receivers.
 
 Outbox dispatch is separate from handler and saga execution. Handlers and sagas finish by committing inbox, outbox, and saga state durably; transport dispatch happens later through either an application-owned manual drain or the optional hosted drain. That separation is what lets the SQL outbox recover after process crashes without holding broker calls inside the SQL transaction.

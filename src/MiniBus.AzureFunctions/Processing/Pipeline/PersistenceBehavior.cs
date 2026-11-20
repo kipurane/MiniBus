@@ -7,17 +7,14 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 internal sealed class PersistenceBehavior : IMiniBusProcessingBehavior
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly MiniBusProcessingLogger _processingLogger;
-    private readonly MiniBusProcessingTracer _processingTracer;
+    private readonly MiniBusProcessingDiagnostics _diagnostics;
 
     public PersistenceBehavior(
         IServiceProvider serviceProvider,
-        MiniBusProcessingLogger processingLogger,
-        MiniBusProcessingTracer processingTracer)
+        MiniBusProcessingDiagnostics diagnostics)
     {
         _serviceProvider = serviceProvider;
-        _processingLogger = processingLogger;
-        _processingTracer = processingTracer;
+        _diagnostics = diagnostics;
     }
 
     public async Task InvokeAsync(
@@ -65,8 +62,7 @@ internal sealed class PersistenceBehavior : IMiniBusProcessingBehavior
             throw new MiniBusPersistenceCommitException("MiniBus persistence commit failed.", exception);
         }
 
-        _processingLogger.OutboxCommitted(context);
-        _processingTracer.OutboxCommitted(context);
+        _diagnostics.OutboxCommitted(context);
     }
 
     private IMiniBusPersistenceSessionFactory? GetPersistenceSessionFactory()

@@ -9,6 +9,12 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
 
     public ConcurrentQueue<RecordingLogEntry> Entries { get; } = new();
 
+    public LogLevel MinimumLevel { get; init; } = LogLevel.Trace;
+
+    public Exception? StartLogException { get; init; }
+
+    public int DisposedScopeCount { get; private set; }
+
     public void AddProvider(ILoggerProvider provider)
     {
     }
@@ -26,7 +32,7 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
     {
         _scopes.Value ??= new Stack<IReadOnlyDictionary<string, object?>>();
         _scopes.Value.Push(scope);
-        return new ScopePopper(_scopes.Value);
+        return new ScopePopper(_scopes.Value, this);
     }
 
     private IReadOnlyList<IReadOnlyDictionary<string, object?>> CaptureScopes()
@@ -68,7 +74,7 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
 
         public bool IsEnabled(LogLevel logLevel)
         {
-            return true;
+            return logLevel >= _factory.MinimumLevel;
         }
 
         public void Log<TState>(
@@ -78,6 +84,11 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
+            if (eventId.Name == "ProcessingStarted" && _factory.StartLogException is { } exceptionOnStart)
+            {
+                throw exceptionOnStart;
+            }
+
             _factory.Entries.Enqueue(new RecordingLogEntry(
                 _categoryName,
                 logLevel,
@@ -94,10 +105,12 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
         private readonly object _lockObject = new object();
         private readonly Stack<IReadOnlyDictionary<string, object?>> _scopes;
         private bool _disposed;
+        private readonly RecordingLoggerFactory _factory;
 
-        public ScopePopper(Stack<IReadOnlyDictionary<string, object?>> scopes)
+        public ScopePopper(Stack<IReadOnlyDictionary<string, object?>> scopes, RecordingLoggerFactory factory)
         {
             _scopes = scopes;
+            _factory = factory;
         }
 
         public void Dispose()
@@ -110,6 +123,7 @@ internal sealed class RecordingLoggerFactory : ILoggerFactory
                 }
 
                 _disposed = true;
+                _factory.DisposedScopeCount++;
                 if (_scopes.Count > 0)
                 {
                     _scopes.Pop();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using MiniBus.Core.Headers;
+using MiniBus.Core.Contracts;
 using MiniBus.Core.Identity;
 using MiniBus.Core.Serialization;
 
@@ -26,27 +27,60 @@ public sealed class MiniBusClaimCheckMessageTransformer
         _messageIdentities = messageIdentities ?? new MiniBusMessageIdentityRegistry();
     }
 
+    public MiniBusOutgoingMessage Transform(
+        object message,
+        Type messageType,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(messageType);
+        if (_options.Enabled)
+        {
+            throw new InvalidOperationException(
+                "MiniBus claim-check behavior requires asynchronous message preparation.");
+        }
+
+        return PrepareInline(message, messageType, headers);
+    }
+
+    public MiniBusOutgoingMessage PrepareStoredBody(
+        BinaryData body,
+        Type messageType,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(messageType);
+        if (!typeof(IMessage).IsAssignableFrom(messageType))
+        {
+            throw new ArgumentException($"Type '{messageType.FullName}' must implement IMessage.", nameof(messageType));
+        }
+
+        var mappedHeaders = headers is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(headers, StringComparer.Ordinal);
+        if (!mappedHeaders.ContainsKey(MiniBusHeaderNames.MessageType)
+            || !mappedHeaders.ContainsKey(MiniBusHeaderNames.EnclosedMessageTypes))
+        {
+            var identity = _messageIdentities.GetIdentity(messageType);
+            mappedHeaders.TryAdd(MiniBusHeaderNames.MessageType, identity);
+            mappedHeaders.TryAdd(MiniBusHeaderNames.EnclosedMessageTypes, identity);
+        }
+
+        AddDefaultHeaders(mappedHeaders);
+        return new MiniBusOutgoingMessage(body, mappedHeaders, MiniBusClaimCheckReferenceReader.IsClaimChecked(mappedHeaders));
+    }
+
     public async Task<MiniBusOutgoingMessage> TransformAsync(
         object message,
         Type messageType,
         IReadOnlyDictionary<string, string>? headers = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(messageType);
-
-        if (!messageType.IsInstanceOfType(message))
-        {
-            throw new ArgumentException($"Message instance must be assignable to '{messageType.FullName}'.", nameof(message));
-        }
-
-        var mappedHeaders = CreateHeaders(messageType, headers, _messageIdentities);
-        var body = _serializer.Serialize(message, messageType);
-        _options.Validate();
-
+        var outgoingMessage = PrepareInline(message, messageType, headers);
+        var body = outgoingMessage.Body;
         if (!_options.Enabled || body.ToMemory().Length <= _options.PayloadThresholdBytes)
         {
-            return new MiniBusOutgoingMessage(body, mappedHeaders, IsClaimChecked: false);
+            return outgoingMessage;
         }
 
         if (_payloadStore is null)
@@ -55,6 +89,7 @@ public sealed class MiniBusClaimCheckMessageTransformer
                 "MiniBus claim-check behavior is enabled, but no claim-check payload store is configured.");
         }
 
+        var mappedHeaders = new Dictionary<string, string>(outgoingMessage.Headers, StringComparer.Ordinal);
         var contentType = mappedHeaders[MiniBusHeaderNames.ContentType];
         var reference = await _payloadStore
             .WriteAsync(
@@ -76,6 +111,24 @@ public sealed class MiniBusClaimCheckMessageTransformer
             IsClaimChecked: true);
     }
 
+    private MiniBusOutgoingMessage PrepareInline(
+        object message,
+        Type messageType,
+        IReadOnlyDictionary<string, string>? headers)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(messageType);
+        if (!messageType.IsInstanceOfType(message))
+        {
+            throw new ArgumentException($"Message instance must be assignable to '{messageType.FullName}'.", nameof(message));
+        }
+
+        var mappedHeaders = CreateHeaders(messageType, headers, _messageIdentities);
+        var body = _serializer.Serialize(message, messageType);
+        _options.Validate();
+        return new MiniBusOutgoingMessage(body, mappedHeaders, IsClaimChecked: false);
+    }
+
     public static Dictionary<string, string> CreateHeaders(
         Type messageType,
         IReadOnlyDictionary<string, string>? headers,
@@ -88,10 +141,15 @@ public sealed class MiniBusClaimCheckMessageTransformer
         var messageTypeName = (messageIdentities ?? new MiniBusMessageIdentityRegistry()).GetIdentity(messageType);
         mappedHeaders[MiniBusHeaderNames.MessageType] = messageTypeName;
         mappedHeaders[MiniBusHeaderNames.EnclosedMessageTypes] = messageTypeName;
-        mappedHeaders.TryAdd(MiniBusHeaderNames.MessageId, Guid.NewGuid().ToString("N"));
-        mappedHeaders.TryAdd(MiniBusHeaderNames.ContentType, DefaultContentType);
+        AddDefaultHeaders(mappedHeaders);
 
         return mappedHeaders;
+    }
+
+    private static void AddDefaultHeaders(IDictionary<string, string> headers)
+    {
+        headers.TryAdd(MiniBusHeaderNames.MessageId, Guid.NewGuid().ToString("N"));
+        headers.TryAdd(MiniBusHeaderNames.ContentType, DefaultContentType);
     }
 
     private static void AddClaimCheckHeaders(

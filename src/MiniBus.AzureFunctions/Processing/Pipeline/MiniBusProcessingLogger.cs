@@ -130,7 +130,6 @@ internal sealed class MiniBusProcessingLogger
 
     public void HandlerInvoked(MiniBusProcessingContext context, Type handlerType)
     {
-        context.LastHandlerType = handlerType;
         Log(
             LogLevel.Information,
             MiniBusProcessingLogEvents.HandlerInvoked,
@@ -145,8 +144,6 @@ internal sealed class MiniBusProcessingLogger
         Type sagaType,
         string sagaCorrelationId)
     {
-        context.LastSagaType = sagaType;
-        context.LastSagaCorrelationId = sagaCorrelationId;
         Log(
             LogLevel.Information,
             MiniBusProcessingLogEvents.SagaInvoked,
@@ -165,8 +162,6 @@ internal sealed class MiniBusProcessingLogger
         Type sagaType,
         string sagaCorrelationId)
     {
-        context.LastSagaType = sagaType;
-        context.LastSagaCorrelationId = sagaCorrelationId;
         Log(
             LogLevel.Information,
             MiniBusProcessingLogEvents.SagaCompleted,

@@ -652,9 +652,57 @@ public sealed class MiniBusProcessorTests
         Assert.Equal("correlation-1", handler.State[MiniBusProcessingLogProperties.CorrelationId]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessAsync_FailureIncludesHandlerWhenInvocationLogsAreFiltered(bool enableTracing)
+    {
+        using var activities = enableTracing ? new RecordingActivityListener() : null;
+        var logs = new RecordingLoggerFactory { MinimumLevel = LogLevel.Warning };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())), services =>
+        {
+            services.AddSingleton<ILoggerFactory>(logs);
+            services.AddSingleton<IHandleMessages<TestCommand>, ThrowingCommandHandler>();
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => processor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            })));
+
+        var failure = Assert.Single(logs.Entries, entry => entry.EventId == MiniBusProcessingLogEvents.ProcessingFailed);
+        Assert.Equal(typeof(ThrowingCommandHandler).FullName, failure.State[MiniBusProcessingLogProperties.HandlerType]);
+        Assert.DoesNotContain(logs.Entries, entry => entry.EventId == MiniBusProcessingLogEvents.HandlerInvoked);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_StartLogFailureDisposesScopeAndActivity()
+    {
+        using var activities = new RecordingActivityListener();
+        var parentActivity = Activity.Current;
+        var error = new InvalidOperationException("logging failed");
+        var logs = new RecordingLoggerFactory { StartLogException = error };
+        var processor = CreateProcessor(new RecordingSerializer(new TestCommand(Guid.NewGuid())),
+            services => services.AddSingleton<ILoggerFactory>(logs));
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => processor.ProcessAsync(
+            CreateMessage(new Dictionary<string, object>
+            {
+                [MiniBusHeaderNames.MessageType] = typeof(TestCommand).AssemblyQualifiedName!
+            })));
+
+        Assert.Same(error, actual);
+        Assert.Equal(1, logs.DisposedScopeCount);
+        Assert.Single(activities.Activities);
+        Assert.Same(parentActivity, Activity.Current);
+    }
+
     [Fact]
     public async Task ProcessAsync_EmitsRetryOutcomeAndNewAttemptScope()
     {
+        using var activities = new RecordingActivityListener();
+        using var metrics = new RecordingMeterListener(MiniBusProcessingMetrics.MeterName);
         var logs = new RecordingLoggerFactory();
         var recorder = new HandlerRecorder();
         var processor = CreateProcessor(
@@ -686,6 +734,13 @@ public sealed class MiniBusProcessorTests
         Assert.Equal(2, starts.Length);
         Assert.Equal("1", starts[1].State[MiniBusProcessingLogProperties.RetryAttempt]);
         Assert.Equal("1", Assert.Single(starts[1].Scopes)[MiniBusProcessingLogProperties.RetryAttempt]);
+        Assert.Equal(2, logs.DisposedScopeCount);
+        Assert.Equal(new[] { MiniBusProcessingOutcomes.Retried, MiniBusProcessingOutcomes.Completed },
+            activities.Activities.Select(activity => GetTag(activity, MiniBusProcessingTraceTags.MiniBusProcessingOutcome)));
+        var attemptMetrics = metrics.Measurements.Where(measurement =>
+            measurement.InstrumentName == MiniBusProcessingMetrics.ProcessingAttemptsInstrumentName).ToArray();
+        Assert.Equal(new[] { MiniBusProcessingOutcomes.Retried, MiniBusProcessingOutcomes.Completed },
+            attemptMetrics.Select(measurement => (string?)measurement.Tags[MiniBusProcessingMetricTags.MiniBusProcessingOutcome]));
     }
 
     [Fact]

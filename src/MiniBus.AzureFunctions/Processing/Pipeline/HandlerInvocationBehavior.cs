@@ -5,22 +5,16 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
 {
     private readonly MessageHandlerInvoker _handlerInvoker;
-    private readonly MiniBusProcessingLogger _processingLogger;
-    private readonly MiniBusProcessingTracer _processingTracer;
-    private readonly MiniBusProcessingMetrics _processingMetrics;
+    private readonly MiniBusProcessingDiagnostics _diagnostics;
     private readonly IServiceProvider _serviceProvider;
 
     public HandlerInvocationBehavior(
         MessageHandlerInvoker handlerInvoker,
-        MiniBusProcessingLogger processingLogger,
-        MiniBusProcessingTracer processingTracer,
-        MiniBusProcessingMetrics processingMetrics,
+        MiniBusProcessingDiagnostics diagnostics,
         IServiceProvider serviceProvider)
     {
         _handlerInvoker = handlerInvoker;
-        _processingLogger = processingLogger;
-        _processingTracer = processingTracer;
-        _processingMetrics = processingMetrics;
+        _diagnostics = diagnostics;
         _serviceProvider = serviceProvider;
     }
 
@@ -39,31 +33,13 @@ internal sealed class HandlerInvocationBehavior : IMiniBusProcessingBehavior
             throw new InvalidOperationException("MiniBus handler context must be created before handler invocation.");
         }
 
-        var logHandlerInvoked = _processingLogger.IsHandlerInvocationEnabled();
-        var traceHandlerInvoked = context.ProcessingActivity is not null;
-        Action<Type>? handlerInvoked = logHandlerInvoked || traceHandlerInvoked
-            ? handlerType =>
-            {
-                if (logHandlerInvoked)
-                {
-                    _processingLogger.HandlerInvoked(context, handlerType);
-                }
-
-                if (traceHandlerInvoked)
-                {
-                    _processingTracer.HandlerInvoked(context, handlerType);
-                }
-            }
-            : null;
-
         await _handlerInvoker
             .InvokeAsync(
                 context.DeserializedMessage,
                 context.HandlerContext,
                 _serviceProvider,
                 cancellationToken,
-                handlerInvoked,
-                (handlerType, invoke) => _processingMetrics.MeasureHandlerInvocationAsync(context, handlerType, invoke))
+                handlerInvocation: (handlerType, invoke) => _diagnostics.ObserveHandlerInvocationAsync(context, handlerType, invoke))
             .ConfigureAwait(false);
 
         await next(context, cancellationToken).ConfigureAwait(false);

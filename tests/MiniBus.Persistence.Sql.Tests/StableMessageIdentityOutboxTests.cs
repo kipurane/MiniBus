@@ -9,6 +9,28 @@ namespace MiniBus.Persistence.Sql.Tests;
 
 public sealed class StableMessageIdentityOutboxTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Serialize_ColumnAndHeadersUseTheIdentitySelectedBeforeSerialization(bool useAsync)
+    {
+        var identities = new MiniBusMessageIdentityRegistry();
+        var serializer = new SqlOutboxOperationSerializer(new Serializer
+        {
+            OnSerialize = () => identities.Map<TestCommand>("new.identity")
+        }, messageIdentities: identities);
+
+        var serialized = useAsync
+            ? await serializer.SerializeAsync(CreateOperation())
+            : serializer.Serialize(CreateOperation());
+
+        var headers = SqlOutboxOperationSerializer.DeserializeHeaders(serialized.HeadersJson);
+        Assert.Equal(typeof(TestCommand).AssemblyQualifiedName, serialized.MessageType);
+        Assert.Equal(serialized.MessageType, headers[MiniBusHeaderNames.MessageType]);
+        Assert.Equal(serialized.MessageType, headers[MiniBusHeaderNames.EnclosedMessageTypes]);
+        Assert.Equal("new.identity", identities.GetIdentity(typeof(TestCommand)));
+    }
+
     [Fact]
     public void SerializeAndDeserialize_UsesStableIdentity()
     {
@@ -78,7 +100,13 @@ public sealed class StableMessageIdentityOutboxTests
 
     private sealed class Serializer : IMessageSerializer
     {
-        public BinaryData Serialize(object message, Type messageType) => BinaryData.FromString("{}");
+        public Action? OnSerialize { get; init; }
+
+        public BinaryData Serialize(object message, Type messageType)
+        {
+            OnSerialize?.Invoke();
+            return BinaryData.FromString("{}");
+        }
         public object Deserialize(BinaryData body, Type messageType) => throw new NotSupportedException();
     }
 }

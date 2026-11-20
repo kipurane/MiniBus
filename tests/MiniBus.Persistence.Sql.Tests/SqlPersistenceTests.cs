@@ -569,7 +569,7 @@ public sealed class SqlPersistenceTests
 
         var exception = Assert.Throws<InvalidOperationException>(() => serializer.Serialize(operation));
 
-        Assert.Contains(nameof(SqlOutboxOperationSerializer.SerializeAsync), exception.Message, StringComparison.Ordinal);
+        Assert.Contains("asynchronous", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -684,6 +684,48 @@ public sealed class SqlPersistenceTests
         Assert.Equal(1, result.ClaimedCount);
         Assert.Equal(0, result.DispatchedCount);
         Assert.Equal(1, result.FailedCount);
+    }
+
+    [Theory]
+    [InlineData(false, 1, 1)]
+    [InlineData(true, 0, 2)]
+    public async Task HostedOutboxDispatcher_MixedClaimFailuresCountAllRowsAndRequireBackoff(
+        bool transportFails,
+        int dispatchedCount,
+        int failedCount)
+    {
+        var operation = CreateStoredOperation();
+        var store = new RecordingOutboxStore(operation) { ClaimFailureCount = 1 };
+        var dispatcher = new RecordingDispatcher
+        {
+            Exception = transportFails ? new InvalidOperationException("transport failed") : null
+        };
+        var hostedDispatcher = CreateHostedDispatcher(store, dispatcher);
+
+        var result = await hostedDispatcher.DispatchCycleAsync();
+
+        Assert.Equal(1, result.BatchAttemptCount);
+        Assert.Equal(2, result.ClaimedCount);
+        Assert.Equal(dispatchedCount, result.DispatchedCount);
+        Assert.Equal(failedCount, result.FailedCount);
+        Assert.True(result.BackoffRequired);
+        Assert.True(result.MoreWorkMayBeAvailable);
+        Assert.Equal(transportFails ? 0 : 1, store.MarkedDispatched.Count);
+        Assert.Equal(transportFails ? 1 : 0, store.MarkedFailed.Count);
+    }
+
+    [Fact]
+    public async Task OutboxDispatcher_AllClaimDecodesFailPreservesPublicDrainException()
+    {
+        var store = new RecordingOutboxStore() { ClaimFailureCount = 2 };
+        var dispatcher = new SqlMiniBusOutboxDispatcher(
+            store, new RecordingDispatcher(), new MiniBusSqlPersistenceOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => dispatcher.DispatchPendingAsync());
+
+        Assert.Equal("unknown identity", exception.InnerException?.Message);
+        Assert.Empty(store.MarkedDispatched);
     }
 
     [Fact]
@@ -1031,13 +1073,26 @@ public sealed class SqlPersistenceTests
         }
     }
 
-    private sealed class RecordingOutboxStore : ISqlMiniBusOutboxStore
+    private sealed class RecordingOutboxStore : ISqlMiniBusOutboxStore, ISqlMiniBusOutboxBatchStore
     {
         private readonly IReadOnlyList<MiniBusOutboxStoredOperation> _operations;
 
         public RecordingOutboxStore(params MiniBusOutboxStoredOperation[] operations)
         {
             _operations = operations;
+        }
+
+        public int ClaimFailureCount { get; init; }
+
+        async Task<SqlMiniBusOutboxClaimResult> ISqlMiniBusOutboxBatchStore.ClaimBatchAsync(
+            int batchSize,
+            CancellationToken cancellationToken)
+        {
+            var operations = await ClaimPendingAsync(batchSize, cancellationToken);
+            return new SqlMiniBusOutboxClaimResult(
+                operations,
+                ClaimFailureCount,
+                ClaimFailureCount > 0 ? new InvalidOperationException("unknown identity") : null);
         }
 
         public int? ClaimedBatchSize { get; private set; }

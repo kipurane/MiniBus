@@ -3,7 +3,7 @@ using MiniBus.Core.Persistence;
 
 namespace MiniBus.Persistence.Sql;
 
-public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
+public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore, ISqlMiniBusOutboxBatchStore
 {
     private readonly MiniBusSqlPersistenceOptions _options;
     private readonly SqlOutboxOperationSerializer _operationSerializer;
@@ -23,6 +23,19 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
     public async Task<IReadOnlyList<MiniBusOutboxStoredOperation>> ClaimPendingAsync(
         int batchSize,
         CancellationToken cancellationToken = default)
+    {
+        var result = await ClaimBatchAsync(batchSize, cancellationToken).ConfigureAwait(false);
+        result.ThrowIfAllFailed();
+        return result.Operations;
+    }
+
+    Task<SqlMiniBusOutboxClaimResult> ISqlMiniBusOutboxBatchStore.ClaimBatchAsync(
+        int batchSize,
+        CancellationToken cancellationToken) => ClaimBatchAsync(batchSize, cancellationToken);
+
+    private async Task<SqlMiniBusOutboxClaimResult> ClaimBatchAsync(
+        int batchSize,
+        CancellationToken cancellationToken)
     {
         if (_options.ConnectionFactory is null)
         {
@@ -88,12 +101,10 @@ public sealed class SqlMiniBusOutboxStore : ISqlMiniBusOutboxStore
             await MarkFailedAsync(failure.Id, failure.Error, cancellationToken).ConfigureAwait(false);
         }
 
-        if (failures.Count > 0 && operations.Count == 0)
-        {
-            throw new InvalidOperationException("MiniBus could not deserialize claimed outbox operations.", failures[0].Error);
-        }
-
-        return operations;
+        return new SqlMiniBusOutboxClaimResult(
+            operations,
+            failures.Count,
+            failures.Count > 0 ? failures[0].Error : null);
     }
 
     public async Task<int> CleanupAsync(CancellationToken cancellationToken = default)

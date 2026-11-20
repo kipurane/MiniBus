@@ -7,9 +7,7 @@ namespace MiniBus.AzureServiceBus.TransportMessageMapping;
 
 public sealed class AzureServiceBusMessageFactory
 {
-    private readonly IMessageSerializer _serializer;
     private readonly MiniBusClaimCheckMessageTransformer _transformer;
-    private readonly MiniBusMessageIdentityRegistry _messageIdentities;
 
     public AzureServiceBusMessageFactory(
         IMessageSerializer serializer,
@@ -17,13 +15,11 @@ public sealed class AzureServiceBusMessageFactory
         IMiniBusClaimCheckPayloadStore? claimCheckPayloadStore = null,
         MiniBusMessageIdentityRegistry? messageIdentities = null)
     {
-        _serializer = serializer;
-        _messageIdentities = messageIdentities ?? new MiniBusMessageIdentityRegistry();
         _transformer = new MiniBusClaimCheckMessageTransformer(
             serializer,
             claimCheckOptions,
             claimCheckPayloadStore,
-            _messageIdentities);
+            messageIdentities);
     }
 
     public ServiceBusMessage CreateMessage(
@@ -31,21 +27,7 @@ public sealed class AzureServiceBusMessageFactory
         Type messageType,
         IReadOnlyDictionary<string, string>? headers = null)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(messageType);
-
-        if (!messageType.IsInstanceOfType(message))
-        {
-            throw new ArgumentException($"Message instance must be assignable to '{messageType.FullName}'.", nameof(message));
-        }
-
-        var mappedHeaders = CreateHeaders(messageType, headers, _messageIdentities);
-        var serviceBusMessage = new ServiceBusMessage(_serializer.Serialize(message, messageType));
-
-        AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, mappedHeaders);
-        ApplySystemProperties(serviceBusMessage, mappedHeaders);
-
-        return serviceBusMessage;
+        return CreateEnvelope(_transformer.Transform(message, messageType, headers));
     }
 
     public async Task<ServiceBusMessage> CreateMessageAsync(
@@ -57,12 +39,7 @@ public sealed class AzureServiceBusMessageFactory
         var outgoingMessage = await _transformer
             .TransformAsync(message, messageType, headers, cancellationToken)
             .ConfigureAwait(false);
-        var serviceBusMessage = new ServiceBusMessage(outgoingMessage.Body);
-
-        AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, outgoingMessage.Headers);
-        ApplySystemProperties(serviceBusMessage, outgoingMessage.Headers);
-
-        return serviceBusMessage;
+        return CreateEnvelope(outgoingMessage);
     }
 
     public ServiceBusMessage CreateMessage(
@@ -70,35 +47,15 @@ public sealed class AzureServiceBusMessageFactory
         Type messageType,
         IReadOnlyDictionary<string, string>? headers = null)
     {
-        ArgumentNullException.ThrowIfNull(body);
-        ArgumentNullException.ThrowIfNull(messageType);
-
-        var mappedHeaders = CreateHeaders(messageType, headers, _messageIdentities);
-        var serviceBusMessage = new ServiceBusMessage(body);
-
-        if (headers is not null)
-        {
-            foreach (var name in new[] { MiniBusHeaderNames.MessageType, MiniBusHeaderNames.EnclosedMessageTypes })
-            {
-                if (headers.TryGetValue(name, out var value))
-                {
-                    mappedHeaders[name] = value;
-                }
-            }
-        }
-
-        AzureServiceBusHeaderMapper.ApplyHeaders(serviceBusMessage, mappedHeaders);
-        ApplySystemProperties(serviceBusMessage, mappedHeaders);
-
-        return serviceBusMessage;
+        return CreateEnvelope(_transformer.PrepareStoredBody(body, messageType, headers));
     }
 
-    private static Dictionary<string, string> CreateHeaders(
-        Type messageType,
-        IReadOnlyDictionary<string, string>? headers,
-        MiniBusMessageIdentityRegistry messageIdentities)
+    private static ServiceBusMessage CreateEnvelope(MiniBusOutgoingMessage outgoingMessage)
     {
-        return MiniBusClaimCheckMessageTransformer.CreateHeaders(messageType, headers, messageIdentities);
+        var message = new ServiceBusMessage(outgoingMessage.Body);
+        AzureServiceBusHeaderMapper.ApplyHeaders(message, outgoingMessage.Headers);
+        ApplySystemProperties(message, outgoingMessage.Headers);
+        return message;
     }
 
     private static void ApplySystemProperties(ServiceBusMessage message, IReadOnlyDictionary<string, string> headers)

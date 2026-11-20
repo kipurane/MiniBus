@@ -176,6 +176,48 @@ public sealed class SqlServerIntegrationTests : IClassFixture<SqlServerIntegrati
     }
 
     [SqlServerFact]
+    public async Task Outbox_MixedIdentityBatchDispatchesValidRowsAndCountsDecodeFailures()
+    {
+        await using var database = await _fixture.CreateDatabaseAsync();
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.CommitAsync(database.CreateInboxMessage("valid-id"), new[] { CreateOutboxOperation() });
+        }
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.CommitAsync(database.CreateInboxMessage("unknown-id"), new[] { CreateOutboxOperation() });
+        }
+        await database.ExecuteNonQueryAsync($"""
+            UPDATE {database.OutboxTableName}
+            SET MessageType = 'unknown.identity'
+            WHERE IncomingMessageId = 'unknown-id';
+            """);
+        var transport = new RecordingOutboxDispatcher();
+        var dispatcher = database.CreateOutboxDispatcher(transport);
+
+        var result = await dispatcher.DispatchPendingBatchAsync();
+
+        Assert.Equal(2, result.ClaimedCount);
+        Assert.Equal(1, result.DispatchedCount);
+        Assert.Equal(1, result.FailedCount);
+        Assert.Equal(1, transport.DispatchedCount);
+        await using var connection = database.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT AttemptCount, LastError, ClaimedUtc, DispatchedUtc
+            FROM {database.OutboxTableName}
+            WHERE IncomingMessageId = 'unknown-id';
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(1, reader.GetInt32(0));
+        Assert.Contains("unknown.identity", reader.GetString(1), StringComparison.Ordinal);
+        Assert.True(reader.IsDBNull(2));
+        Assert.True(reader.IsDBNull(3));
+    }
+
+    [SqlServerFact]
     public async Task Outbox_UnknownIdentityRecordsFailureAndReleasesClaim()
     {
         await using var database = await _fixture.CreateDatabaseAsync();

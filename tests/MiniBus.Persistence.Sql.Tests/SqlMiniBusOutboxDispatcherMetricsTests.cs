@@ -5,6 +5,7 @@ using Xunit;
 
 namespace MiniBus.Persistence.Sql.Tests;
 
+[Collection(nameof(SqlOutboxMetricsCollection))]
 public sealed class SqlMiniBusOutboxDispatcherMetricsTests
 {
     [Fact]
@@ -75,6 +76,43 @@ public sealed class SqlMiniBusOutboxDispatcherMetricsTests
         });
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task DispatchPendingAsync_ClaimDecodeFailuresAppearInBatchMetrics(int validCount)
+    {
+        using var metrics = new RecordingMeterListener(SqlMiniBusOutboxMetrics.MeterName);
+        var operations = Enumerable.Range(0, validCount)
+            .Select(_ => CreateOperation(MiniBusOutboxOperationKind.Send)).ToArray();
+        var store = new RecordingOutboxStore(operations) { ClaimFailureCount = 1 };
+        var dispatcher = new SqlMiniBusOutboxDispatcher(
+            store, new RecordingOutboxDispatcher(), new MiniBusSqlPersistenceOptions());
+
+        if (validCount == 0)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchPendingAsync());
+        }
+        else
+        {
+            Assert.Equal(validCount, await dispatcher.DispatchPendingAsync());
+        }
+
+        var batch = Assert.Single(metrics.Measurements, measurement =>
+            measurement.InstrumentName == SqlMiniBusOutboxMetrics.DispatchBatchesInstrumentName);
+        Assert.Equal(SqlMiniBusOutboxDispatchOutcomes.Failed,
+            batch.Tags[SqlMiniBusOutboxMetricTags.MiniBusSqlOutboxDispatchOutcome]);
+        Assert.Contains(metrics.Measurements, measurement =>
+            measurement.InstrumentName == SqlMiniBusOutboxMetrics.DispatchOperationsInstrumentName
+            && Equals(measurement.Value, (long)validCount + 1)
+            && (string?)measurement.Tags[SqlMiniBusOutboxMetricTags.MiniBusSqlOutboxDispatchOutcome] == "claimed");
+        Assert.Contains(metrics.Measurements, measurement =>
+            measurement.InstrumentName == SqlMiniBusOutboxMetrics.DispatchOperationsInstrumentName
+            && Equals(measurement.Value, 1L)
+            && !measurement.Tags.ContainsKey(SqlMiniBusOutboxMetricTags.MiniBusOutboxOperationKind)
+            && (string?)measurement.Tags[SqlMiniBusOutboxMetricTags.MiniBusSqlOutboxDispatchOutcome]
+                == SqlMiniBusOutboxDispatchOutcomes.Failed);
+    }
+
     [Fact]
     public async Task DispatchPendingAsync_CompletesWithoutMetricsListener()
     {
@@ -108,13 +146,26 @@ public sealed class SqlMiniBusOutboxDispatcherMetricsTests
 
     private sealed record TestCommand(Guid Id) : ICommand;
 
-    private sealed class RecordingOutboxStore : ISqlMiniBusOutboxStore
+    private sealed class RecordingOutboxStore : ISqlMiniBusOutboxStore, ISqlMiniBusOutboxBatchStore
     {
         private readonly IReadOnlyList<MiniBusOutboxStoredOperation> _operations;
 
         public RecordingOutboxStore(IReadOnlyList<MiniBusOutboxStoredOperation> operations)
         {
             _operations = operations;
+        }
+
+        public int ClaimFailureCount { get; init; }
+
+        async Task<SqlMiniBusOutboxClaimResult> ISqlMiniBusOutboxBatchStore.ClaimBatchAsync(
+            int batchSize,
+            CancellationToken cancellationToken)
+        {
+            var operations = await ClaimPendingAsync(batchSize, cancellationToken);
+            return new SqlMiniBusOutboxClaimResult(
+                operations,
+                ClaimFailureCount,
+                ClaimFailureCount > 0 ? new InvalidOperationException("unknown identity") : null);
         }
 
         public int? BatchSize { get; private set; }
@@ -224,4 +275,9 @@ public sealed class SqlMiniBusOutboxDispatcherMetricsTests
                 tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value, StringComparer.Ordinal));
         }
     }
+}
+
+[CollectionDefinition(nameof(SqlOutboxMetricsCollection), DisableParallelization = true)]
+public sealed class SqlOutboxMetricsCollection
+{
 }

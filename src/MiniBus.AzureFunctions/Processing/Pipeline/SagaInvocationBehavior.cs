@@ -5,22 +5,16 @@ namespace MiniBus.AzureFunctions.Processing.Pipeline;
 internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly MiniBusProcessingLogger _processingLogger;
-    private readonly MiniBusProcessingTracer _processingTracer;
-    private readonly MiniBusProcessingMetrics _processingMetrics;
+    private readonly MiniBusProcessingDiagnostics _diagnostics;
     private readonly SagaInvoker? _sagaInvoker;
 
     public SagaInvocationBehavior(
         IServiceProvider serviceProvider,
-        MiniBusProcessingLogger processingLogger,
-        MiniBusProcessingTracer processingTracer,
-        MiniBusProcessingMetrics processingMetrics,
+        MiniBusProcessingDiagnostics diagnostics,
         SagaInvoker? sagaInvoker)
     {
         _serviceProvider = serviceProvider;
-        _processingLogger = processingLogger;
-        _processingTracer = processingTracer;
-        _processingMetrics = processingMetrics;
+        _diagnostics = diagnostics;
         _sagaInvoker = sagaInvoker;
     }
 
@@ -57,17 +51,8 @@ internal sealed class SagaInvocationBehavior : IMiniBusProcessingBehavior
                 context.HandlerContext,
                 _serviceProvider,
                 cancellationToken,
-                diagnostic =>
-                {
-                    _processingLogger.SagaInvoked(context, diagnostic.SagaType, diagnostic.CorrelationId);
-                    _processingTracer.SagaInvoked(context, diagnostic.SagaType, diagnostic.CorrelationId);
-                    if (diagnostic.Completed)
-                    {
-                        _processingLogger.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
-                        _processingTracer.SagaCompleted(context, diagnostic.SagaType, diagnostic.CorrelationId);
-                    }
-                },
-                (sagaType, _, invoke) => _processingMetrics.MeasureSagaInvocationAsync(context, sagaType, invoke),
+                sagaInvoked: null,
+                (sagaType, _, invoke) => _diagnostics.ObserveSagaInvocationAsync(context, sagaType, invoke),
                 sessionSagaPersistence,
                 requireInvocationPersistence: context.PersistenceSession is not null)
             .ConfigureAwait(false);

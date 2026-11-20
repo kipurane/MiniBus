@@ -1,6 +1,7 @@
 using MiniBus.Core.ClaimCheck;
 using MiniBus.Core.Contracts;
 using MiniBus.Core.Headers;
+using MiniBus.Core.Identity;
 using MiniBus.Core.Serialization;
 using Xunit;
 
@@ -8,6 +9,61 @@ namespace MiniBus.Core.Tests;
 
 public sealed class ClaimCheckTests
 {
+    [Fact]
+    public async Task Transformer_SynchronousAndAsynchronousInlinePreparationAgree()
+    {
+        var identities = new MiniBusMessageIdentityRegistry().Map<TestCommand>("command.stable");
+        var transformer = new MiniBusClaimCheckMessageTransformer(new RecordingSerializer("body"), messageIdentities: identities);
+        var headers = new Dictionary<string, string>
+        {
+            [MiniBusHeaderNames.MessageId] = "message-1",
+            [MiniBusHeaderNames.MessageType] = "received.identity"
+        };
+        var command = new TestCommand(Guid.NewGuid());
+
+        var synchronous = transformer.Transform(command, typeof(TestCommand), headers);
+        var asynchronous = await transformer.TransformAsync(command, typeof(TestCommand), headers);
+
+        Assert.Equal(synchronous.Body.ToArray(), asynchronous.Body.ToArray());
+        Assert.Equal(synchronous.Headers.OrderBy(pair => pair.Key), asynchronous.Headers.OrderBy(pair => pair.Key));
+        Assert.Equal("command.stable", synchronous.Headers[MiniBusHeaderNames.MessageType]);
+        Assert.Equal("received.identity", headers[MiniBusHeaderNames.MessageType]);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("legacy.primary", null)]
+    [InlineData(null, "legacy.enclosed")]
+    [InlineData("legacy.primary", "legacy.enclosed")]
+    public void Transformer_StoredBodyPreservesRecordedIdentityAndPayload(string? primary, string? enclosed)
+    {
+        var serializer = new RecordingSerializer("must not serialize");
+        var store = new RecordingPayloadStore();
+        var identities = new MiniBusMessageIdentityRegistry().Map<TestCommand>("current.identity");
+        var transformer = new MiniBusClaimCheckMessageTransformer(serializer,
+            new MiniBusClaimCheckOptions { Enabled = true, PayloadThresholdBytes = 1 }, store, identities);
+        var body = BinaryData.FromString("stored body");
+        var headers = CreateClaimCheckHeaders();
+        if (primary is not null)
+        {
+            headers[MiniBusHeaderNames.MessageType] = primary;
+        }
+        if (enclosed is not null)
+        {
+            headers[MiniBusHeaderNames.EnclosedMessageTypes] = enclosed;
+        }
+
+        var prepared = transformer.PrepareStoredBody(body, typeof(TestCommand), headers);
+
+        Assert.Same(body, prepared.Body);
+        Assert.True(prepared.IsClaimChecked);
+        Assert.Equal(primary ?? "current.identity", prepared.Headers[MiniBusHeaderNames.MessageType]);
+        Assert.Equal(enclosed ?? "current.identity", prepared.Headers[MiniBusHeaderNames.EnclosedMessageTypes]);
+        Assert.Empty(store.Writes);
+        Assert.Equal(0, serializer.SerializeCount);
+        Assert.False(headers.ContainsKey(MiniBusHeaderNames.MessageId));
+    }
+
     [Fact]
     public async Task Transformer_IsDisabledByDefault()
     {
@@ -231,6 +287,8 @@ public sealed class ClaimCheckTests
     {
         private readonly string _body;
 
+        public int SerializeCount { get; private set; }
+
         public RecordingSerializer(string body)
         {
             _body = body;
@@ -238,6 +296,7 @@ public sealed class ClaimCheckTests
 
         public BinaryData Serialize(object message, Type messageType)
         {
+            SerializeCount++;
             return BinaryData.FromString(_body);
         }
 

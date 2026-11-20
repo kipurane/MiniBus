@@ -4,6 +4,9 @@ The message factory uses the registered `MiniBusMessageIdentityRegistry` for wir
 
 `MiniBus.AzureServiceBus` provides Azure Service Bus transport support for MiniBus.
 
+When claim-check is enabled, prepare fresh messages through `AzureServiceBusMessageFactory.CreateMessageAsync`. The synchronous object overload of `CreateMessage` now throws `InvalidOperationException` for this configuration, including below-threshold payloads. Stored bodies use the `BinaryData` overload, which preserves their recorded identity and claim-check headers.
+
+
 It includes:
 
 - `AzureServiceBusTransportRoutes` for explicit command, event, and scheduled-message destinations.
