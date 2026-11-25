@@ -209,6 +209,69 @@ public sealed class SagaTests
     }
 
     [Fact]
+    public async Task InMemorySagaPersistence_ThrowsWhenCreatingDuplicateCorrelationId()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+        await persistence.CreateAsync(data);
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.CreateAsync(new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" }));
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_ThrowsWhenSavingNonExistentSaga()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-missing" };
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(data, version: null));
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_ThrowsWhenSavingWithStaleVersion()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+        await persistence.CreateAsync(data);
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.SaveAsync(data, version: "99"));
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_ThrowsWhenCompletingNonExistentSaga()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-missing" };
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.CompleteAsync(data, version: null));
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_ThrowsWhenCompletingWithStaleVersion()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var data = new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" };
+        await persistence.CreateAsync(data);
+
+        await Assert.ThrowsAsync<SagaPersistenceException>(() =>
+            persistence.CompleteAsync(data, version: "99"));
+    }
+
+    [Fact]
+    public async Task InMemorySagaPersistence_LoadReturnsNullWhenNotFound()
+    {
+        var persistence = new InMemorySagaPersistence();
+
+        var result = await persistence.LoadAsync<OrderSagaData>("order-missing");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public async Task SagaInvoker_StartsNewSagaAndPersistsState()
     {
         ResetSagaCounters();
@@ -515,6 +578,73 @@ public sealed class SagaTests
         Assert.Equal("started", stored.Data.Step);
     }
 
+    [Fact]
+    public async Task SagaInvoker_ThrowsWhenCorrelationIdIsEmpty()
+    {
+        var persistence = new InMemorySagaPersistence();
+        var registry = new SagaRegistry();
+        registry.Register<EmptyCorrelationSaga, OrderSagaData>();
+        var invoker = new SagaInvoker(registry, persistence);
+
+        await Assert.ThrowsAsync<SagaMappingException>(() => invoker.InvokeAsync(
+            new StartOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SagaInvoker_InvokesDiagnosticCallbacksForNewSaga()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        var invoker = CreateInvoker(persistence);
+        var diagnostics = new List<SagaInvocationDiagnostic>();
+
+        await invoker.InvokeAsync(
+            new StartOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None,
+            sagaInvoked: diagnostics.Add);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(typeof(OrderSaga), diagnostic.SagaType);
+        Assert.Equal("order-1", diagnostic.CorrelationId);
+        Assert.False(diagnostic.Completed);
+    }
+
+    [Fact]
+    public async Task SagaInvoker_InvokesDiagnosticCallbackWithCompletedTrueOnCompletion()
+    {
+        ResetSagaCounters();
+        var persistence = new InMemorySagaPersistence();
+        await persistence.CreateAsync(new OrderSagaData { Id = Guid.NewGuid(), CorrelationId = "order-1" });
+        var invoker = CreateInvoker(persistence);
+        var diagnostics = new List<SagaInvocationDiagnostic>();
+
+        await invoker.InvokeAsync(
+            new CompleteOrder("order-1"),
+            new RecordingMiniBusContext(),
+            EmptyServiceProvider.Instance,
+            CancellationToken.None,
+            sagaInvoked: diagnostics.Add);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.True(diagnostic.Completed);
+    }
+
+    [Fact]
+    public void SagaRegistry_GetDefinitionsForMessage_ReturnsEmptyForUnregisteredType()
+    {
+        var registry = new SagaRegistry();
+        registry.Register<OrderSaga, OrderSagaData>();
+
+        var definitions = registry.GetDefinitionsForMessage(typeof(string));
+
+        Assert.Empty(definitions);
+    }
+
     private static SagaInvoker CreateInvoker(ISagaPersistence persistence)
     {
         var registry = new SagaRegistry();
@@ -727,6 +857,21 @@ public sealed class SagaTests
     {
         public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
         {
+        }
+    }
+
+    private sealed class EmptyCorrelationSaga :
+        MiniBusSaga<OrderSagaData>,
+        IHandleSagaMessages<StartOrder>
+    {
+        public override void ConfigureHowToFindSaga(SagaMapper<OrderSagaData> mapper)
+        {
+            mapper.StartsWith<StartOrder>(_ => null);
+        }
+
+        public Task Handle(StartOrder message, MiniBusContext context, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
         }
     }
 
